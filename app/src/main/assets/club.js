@@ -901,11 +901,32 @@ function betweenHeroHands(t){
 }
 
 function beginNextHeroHand(t){
- readyRoster(t);
  if(breakDue()){
+   readyRoster(t);
    g.breakLeft=120;g.rested=true;g.stage='break';return;
  }
+ if(requestLevelAd(t,false))return;
+ readyRoster(t);
  dealAt(t);
+}
+
+// Only the foreground native test build can present an interstitial. All cards,
+// stacks and hand numbers stay at the old hand while the app owns this token.
+let levelAdsEnabled=false;
+function requestLevelAd(t,allTables){
+ if(!levelAdsEnabled||g.cash||t!==g.ts[0]||!t.hand)return false;
+ const {level}=nextDealConfig(t);
+ if(t.level>=level||!(level===4||level===8&&g.rested))return false;
+ const token=[g.exitId,g.count+1,level].join('/');
+ g.levelAdGate={token,level,allTables};g.stage='levelAd';
+ return true;
+}
+function completeLevelAd(token){
+ const gate=g?.levelAdGate;
+ if(!gate||gate.token!==token||g.stage!=='levelAd')return;
+ delete g.levelAdGate;g.stage='playing';
+ if(gate.allTables){newRound();return}
+ const main=g.ts[0];readyRoster(main);dealAt(main);
 }
 
 function advanceTournamentBoundary(t,voiceBusy){
@@ -926,7 +947,8 @@ function headsUpDue(){
 }
 function resumeTournamentBreak(voiceBusy){
  g.stage='playing';
- if(headsUpDue())advanceTournamentBoundary(g.ts[0],voiceBusy);else newRound();
+ if(headsUpDue())advanceTournamentBoundary(g.ts[0],voiceBusy);
+ else if(!requestLevelAd(g.ts[0],true))newRound();
 }
 function wrap(rebuyDecision,voiceBusy=false){
  const t=g.ts[0],hero=t.ps.find(p=>p.id===-1);
@@ -1204,6 +1226,7 @@ function updateFoldReservation(t,request){
  if(request.checked===true&&canReserveFold(t,t.ps.find(p=>p.id===-1)))t.preFoldHand=t.hand;
 }
 function step(dt,inspecting,holdTable,voiceBusy=false){if(!g)return;
+ if(g.stage==='levelAd')return;
  if(g.stage==='waitingFinalTable'||g.stage==='waitingHeadsUp'){
    if(!voiceBusy&&!inspecting&&!holdTable)advanceTournamentBoundary(g.ts[0],false);
    return;
@@ -1249,12 +1272,26 @@ function step(dt,inspecting,holdTable,voiceBusy=false){if(!g)return;
    }else{record(t);t.phase='done';t.feed=t.summary}
  }
 }
-function snapshot(){let v={prizeSchedules,prizeContributionRate,tournamentEntries,tournamentResult:state.tournamentResult||null,wallet:state.wallet,opt:state.opt,last:state.last,lastExit:state.lastExit||null,notice,spoken,g:null};if(!g)return v;for(const table of g.ts)accountFinished(table);let t=g.ts[0],hero=t.ps.find(p=>p.id===-1),own=t.phase==='bet'&&!t.boardHold&&t.ps[t.actor]?.id===-1;
+const cashierOffers={
+ reward:{points:50000,maxWallet:50000},
+ packs:[{id:'chips20',points:200000,price:2900},{id:'chips50',points:500000,price:5900},{id:'chips100',points:1000000,price:9900}]
+};
+function purchasePack(id,sequence){
+ const pack=cashierOffers.packs.find(item=>item.id===id);
+ if(!pack||!Number.isSafeInteger(sequence)||sequence!==(state.purchaseSequence||0)+1)return;
+ const balance=state.wallet+pack.points;
+ if(!Number.isSafeInteger(balance))return;
+ state.wallet=balance;
+ state.purchaseSequence=sequence;
+ notice=money(pack.points)+' P 모의 충전';
+}
+function snapshot(){let v={cashier:cashierOffers,purchaseSequence:state.purchaseSequence||0,rewardedViews:state.rewardedViews||0,rewardEligible:state.wallet<=cashierOffers.reward.maxWallet,prizeSchedules,prizeContributionRate,tournamentEntries,tournamentResult:state.tournamentResult||null,wallet:state.wallet,opt:state.opt,last:state.last,lastExit:state.lastExit||null,notice,spoken,g:null};if(!g)return v;for(const table of g.ts)accountFinished(table);let t=g.ts[0],hero=t.ps.find(p=>p.id===-1),own=t.phase==='bet'&&!t.boardHold&&t.ps[t.actor]?.id===-1;
  updateBlindNotices();
  const boundary=afterHand(t);
  const stats=g.cash?null:tournamentStats(t,hero);
  v.g={nextBlinds:t.nextBlinds||null,canPreFold:!!canReserveFold(t,hero),preFold:!!(t.preFoldHand===t.hand&&foldReservationLive(t,hero)),autoNextLeft:boundary?autoNextRemaining(t):null,afterHand:boundary,wagers:t.wagers||[],lastClosed:g.lastClosed||null,exitQuote:exitQuote(),sessionId:g.exitId,settlement:t.phase==='done'?t.settlement||null:null,cashStats:g.cash?cashStats(t,hero):null,tournament:stats,leaders:tournamentLeaders(g),lastTransfer:g.lastTransfer||null,quick:own?quickBets(t,hero):null,announcement:t.announcement?.hand===t.hand?t.announcement:null,beforeStreet:t.beforeStreet||0,boardHold:t.boardHold||0,entrants:g.entrants,capacity:g.capacity,tables:g.ts.map(tableInfo),entries:stats?stats.entries:0,rebuyCount:stats?stats.rebuys:0,payouts:stats?stats.payouts:[],lastHero:t.lastHero?.hand===t.hand?t.lastHero:null,buyin:g.buyin,pub:g.pub,cash:g.cash,double:g.double,hand:g.count,level:t.level,sb:t.sb,bb:t.bb,pool:g.pool,break:g.stage==='break',breakLeft:g.breakLeft,elapsed:g.elapsed,bank:g.bank,rebuy:g.rebuyAsk,left:stats?stats.alive:t.ps.length,ready:t.phase==='done',phase:visiblePhase(t),pocketTurnMs:t.pocketTurnLeft>0?Math.round(1000*(POCKET_TURN_SECONDS-t.pocketTurnLeft)):-1,showdownTitle:hasShowdownTitle(t),showdownTitleMs:hasShowdownTitle(t)?Math.round(1000*(SHOWDOWN_TITLE_SECONDS-t.titleLeft)):0,allInRunout:!!t.allInRunout,street:t.stage,btn:t.btn,actor:t.actor,sbs:t.sbSeat,bbs:t.bbSeat,timer:g.timer,board:t.boards,feed:t.feed,summary:t.summary,pot:t.ps.reduce((s,q)=>s+q.paid,0),reveal:g.revealed,show:t.reveal,own,call:Math.min(hero.stack,owing(t,hero)),min:Math.min(hero.stack+hero.bet,t.price+t.raise),max:hero.stack+hero.bet,raise:own&&canRaise(t,hero),other:g.ts[1]?.feed||'',ranks:g.revealed&&!t.boardHold?t.boards.filter(b=>b.length).map(b=>label(best(hero.hole,b))):[],p:t.ps.map((p,i)=>({id:p.id,...publicSkill(p),name:nameOf(p.id),rebuys:rebuyCountOf(p),buyin:p.buyin??g.buyin,banked:p.banked||0,move:p.move||null,stack:t.phase==='showdown'&&t.preAward?t.preAward[i]:p.stack,bet:p.bet,fold:p.fold,action:p.action,won:t.phase==='done'?(t.wins[p.id]||0):0,spot:t.phase==='showdown'&&t.lines[t.reveal-1]?.id===p.id,hole:visiblePocket(t,p)})),boardWins:t.double&&t.phase==='done'&&t.lines?.length?t.byBoard.map(w=>Object.keys(w).map(k=>nameOf(+k)).join('·')):[]};
  if(g.stage==='finalTable'||g.stage==='headsUp')v.g[g.stage+'Ms']=Math.round(g[g.stage+'Left']*1000);
+ if(g.levelAdGate)v.g.levelAd={token:g.levelAdGate.token,level:g.levelAdGate.level,skip:!!g.levelAdGate.restored};
  if(!g.cash){
    const nextLevel=t.nextBlinds?.level??(t.level+1),[sb,bb]=blindsAt(nextLevel);
    v.g.nextLevelBlinds={level:nextLevel,sb,bb};
@@ -1269,15 +1306,38 @@ function snapshot(){let v={prizeSchedules,prizeContributionRate,tournamentEntrie
 function applyRewardedAds(completed){
  const applied=state.rewardedViews||0;
  if(!Number.isSafeInteger(completed)||completed<=applied)return false;
- const balance=state.wallet+(completed-applied)*50000;
+ const balance=state.wallet+(completed-applied)*cashierOffers.reward.points;
  if(!Number.isSafeInteger(balance))return false;
  state.wallet=balance;
  state.rewardedViews=completed;
- notice='광고 보상 '+money((completed-applied)*50000)+' P 지급';
+ notice='광고 보상 '+money((completed-applied)*cashierOffers.reward.points)+' P 지급';
  return true;
 }
+const ATTENDANCE_POINTS=10000;
+let pendingAttendance=null;
+function attendanceOffer(){
+ const day=Math.floor((Date.now()+9*3600000)/86400000);
+ return {day,points:ATTENDANCE_POINTS,available:day>(state.attendanceDay||0)};
+}
+// The native rules worker commits this proposed whole session before confirming the reward.
+// A process restart between commit and confirmation reads the day and wallet from the same record.
+function prepareAttendance(day){
+ const offer=attendanceOffer(),wallet=state.wallet+ATTENDANCE_POINTS;
+ pendingAttendance=null;
+ if(!offer.available||day!==offer.day||!Number.isSafeInteger(wallet))return '{}';
+ pendingAttendance={day,wallet};
+ return JSON.stringify({session:JSON.stringify({...state,g,attendanceDay:day,wallet})});
+}
 function mobile(raw){let c=JSON.parse(raw),t=g?.ts[0],preFoldConsumed=false;notice='';spoken='';
- if(c.op==='init'){outgoingTournamentEvents=[];tournamentTitleStarted='';}
+ if(c.op==='prepareAttendance')return prepareAttendance(c.day);
+ let attendancePaid=false;
+ if(c.op==='confirmAttendance'&&pendingAttendance?.day===c.day&&state.wallet+ATTENDANCE_POINTS===pendingAttendance.wallet){
+   state.attendanceDay=c.day;state.wallet=pendingAttendance.wallet;attendancePaid=true;
+ }
+ pendingAttendance=null;
+ if(c.op==='init'){outgoingTournamentEvents=[];tournamentTitleStarted='';levelAdsEnabled=c.levelAds===true;}
+ if(c.op==='completeLevelAd')completeLevelAd(c.token);
+ if(g?.levelAdGate&&['act','next','re','skip','surrender','prefold'].includes(c.op))return JSON.stringify(snapshot());
  if(c.op==='ackRebuyNotice'&&g?.rebuyNoticePending&&c.session===g.exitId){
    g.rebuyLevelSeen=true;g.rebuyNoticePending=false;
  }
@@ -1286,9 +1346,15 @@ function mobile(raw){let c=JSON.parse(raw),t=g?.ts[0],preFoldConsumed=false;noti
  if(preset&&!preset.enabled)break;
  let kind=preset?(key==='allin'&&owing(t,p)>=p.stack?'call':'raise'):key;
  let total=preset&&key!=='raise'?preset.target:(c.amount||0);
- if(!act(t,kind,total,preset?key:undefined))break;t.preFoldHand=null;g.timer=ACTION_SECONDS;delay=t.phase==='showdown'?1.82:.7}break;case 'next':if(t?.phase==='done'&&!g.rebuyAsk&&g.stage==='playing'&&(c.hand==null||c.hand===g.count))wrap(undefined,c.voiceBusy===true);break;case 're':if(g?.rebuyAsk)wrap(c.yes,c.voiceBusy===true);break;case 'skip':if(g?.stage==='break')resumeTournamentBreak(c.voiceBusy===true);break;case 'surrender':surrender(c.token);break;case 'leave':if(g?.cash&&g.count>=6&&t.phase==='done')cashExit('cashSettled');break;case 'pack':if([50000,200000,400000,700000].includes(c.points))state.wallet+=c.points;break;case 'day':if(!g&&state.wallet===0)state.wallet=50000;break;case 'option':if(c.name==='speed')state.opt.speed=state.opt.speed===1?2:1;else if(['sound','voice','timing','peek'].includes(c.name))state.opt[c.name]=!state.opt[c.name];break}
+ if(!act(t,kind,total,preset?key:undefined))break;t.preFoldHand=null;g.timer=ACTION_SECONDS;delay=t.phase==='showdown'?1.82:.7}break;case 'next':if(t?.phase==='done'&&!g.rebuyAsk&&g.stage==='playing'&&(c.hand==null||c.hand===g.count))wrap(undefined,c.voiceBusy===true);break;case 're':if(g?.rebuyAsk)wrap(c.yes,c.voiceBusy===true);break;case 'skip':if(g?.stage==='break')resumeTournamentBreak(c.voiceBusy===true);break;case 'surrender':surrender(c.token);break;case 'leave':if(g?.cash&&g.count>=6&&t.phase==='done')cashExit('cashSettled');break;case 'purchasePack':purchasePack(c.id,c.sequence);break;case 'day':if(!g&&state.wallet===0)state.wallet=50000;break;case 'option':if(c.name==='speed')state.opt.speed=state.opt.speed===1?2:1;else if(['sound','voice','timing','peek'].includes(c.name))state.opt[c.name]=!state.opt[c.name];break}
  if(c.op==='init'&&g&&!g.cash){
    const main=g.ts[0];
+   // A killed SDK activity cannot deliver its close callback. Consume that
+   // saved opportunity on return without redisplaying it or replaying the deal.
+   if(g.levelAdGate){
+     g.levelAdGate.restored=true;
+     if(!levelAdsEnabled)completeLevelAd(g.levelAdGate.token);
+   }
    if(main.level===REBUY_LEVEL&&!g.rebuyLevelSeen&&!g.rested)g.rebuyNoticePending=true;
    // An open legacy reentry dialog past the new cutoff returns to the hand's result.
    // The normal next-hand path presents the finish and commits the wallet together.
@@ -1296,5 +1362,6 @@ function mobile(raw){let c=JSON.parse(raw),t=g?.ts[0],preFoldConsumed=false;noti
  }
  const rewardApplied=(c.op==='init'||c.op==='rewardedAd')&&applyRewardedAds(c.completedAds);
  const view=snapshot();if(t&&!g&&view.tournamentResult&&['step','next','re','surrender'].includes(c.op))view.tournamentFinished=true;if(rewardApplied)view.rewardApplied=true;if(preFoldConsumed)view.preFoldConsumed=true;view.tournamentEvents=outgoingTournamentEvents;outgoingTournamentEvents=[];
+ view.attendance=attendanceOffer();if(attendancePaid)view.attendancePaid=true;
  if(tournamentTitleStarted){view[tournamentTitleStarted+'Started']=true;tournamentTitleStarted='';}
  return JSON.stringify(view)}

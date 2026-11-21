@@ -28,7 +28,7 @@ final class RewardAdDesk {
     }
 
     void start() {
-        if (BuildConfig.DEBUG) {
+        if (BuildConfig.TEST_ADS) {
             // Google's shared demo app has no publisher consent-message configuration.
             consentChecked = true;
         } else {
@@ -58,7 +58,7 @@ final class RewardAdDesk {
     }
 
     boolean privacyRequired() {
-        return !BuildConfig.DEBUG && consent.getPrivacyOptionsRequirementStatus() ==
+        return !BuildConfig.TEST_ADS && consent.getPrivacyOptionsRequirementStatus() ==
             ConsentInformation.PrivacyOptionsRequirementStatus.REQUIRED;
     }
 
@@ -81,10 +81,10 @@ final class RewardAdDesk {
 
     String caption() {
         if (!failure.isEmpty()) return failure;
-        return BuildConfig.DEBUG ? "Google 테스트 광고 · 시청 완료 보상" : "광고 시청 완료 보상";
+        return BuildConfig.TEST_ADS ? "Google 테스트 광고 · 시청 완료 보상" : "광고 시청 완료 보상";
     }
 
-    boolean enabled() { return !requested && !showing; }
+    boolean enabled() { return !requested && !showing && host.arena.cashier.rewardEligible(); }
     void leave() { requested = false; }
 
     void watch() {
@@ -100,22 +100,25 @@ final class RewardAdDesk {
         return host.active && !host.isFinishing() && !host.isDestroyed() && host.arena.panel.equals("shop");
     }
 
+    boolean sdkReady() {
+        if (initialized) return true;
+        if (!consentChecked || initializing) return false;
+        initializing=true;
+        new Thread(() -> MobileAds.initialize(host.getApplicationContext(), status -> host.ui.post(() -> {
+            if (host.isDestroyed()) return;
+            initializing=false;initialized=true;
+            if (requested) load();
+            host.warmDailyAd();
+        })), "MobileAdsInit").start();
+        return false;
+    }
+
     private void load() {
-        if (!requested || !onCashier()) {
+        if (!requested || !onCashier() || !host.arena.cashier.rewardEligible()) {
             requested = false;
             return;
         }
-        if (!initialized) {
-            if (initializing) return;
-            initializing = true;
-            new Thread(() -> MobileAds.initialize(host.getApplicationContext(), status -> host.ui.post(() -> {
-                if (host.isDestroyed()) return;
-                initializing = false;
-                initialized = true;
-                load();
-            })), "RewardAdInit").start();
-            return;
-        }
+        if (!sdkReady()) return;
         if (ready != null && SystemClock.elapsedRealtime() - loadedAt < 55 * 60_000L) {
             show();
             return;
@@ -151,6 +154,10 @@ final class RewardAdDesk {
     }
 
     private void show() {
+        if (!requested || !onCashier() || !host.arena.cashier.rewardEligible()) {
+            requested = false;
+            return;
+        }
         RewardedAd ad = ready;
         ready = null;
         requested = false;

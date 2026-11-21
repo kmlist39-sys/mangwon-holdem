@@ -1,12 +1,24 @@
 plugins { id 'com.android.application' }
 def adId = providers.gradleProperty('mangwonAdMobAppId').orElse(providers.environmentVariable('MANGWON_ADMOB_APP_ID')).getOrElse('')
 def unitId = providers.gradleProperty('mangwonRewardedUnitId').orElse(providers.environmentVariable('MANGWON_REWARDED_UNIT_ID')).getOrElse('')
+def reviewFlag = providers.gradleProperty('mangwonReviewTestAds').getOrElse('false')
+if (!(reviewFlag in ['true', 'false'])) {
+    throw new GradleException('mangwonReviewTestAds must be true or false.')
+}
+def reviewTestAds = reviewFlag == 'true'
 def liveAds = !adId.isEmpty() || !unitId.isEmpty()
+if (reviewTestAds && liveAds) {
+    throw new GradleException('Review test ads cannot be combined with production AdMob IDs.')
+}
 if (liveAds && (!(adId ==~ /ca-app-pub-[0-9]{16}~[0-9]{10}/) ||
         !(unitId ==~ /ca-app-pub-[0-9]{16}\/[0-9]{10}/) ||
         adId.split('~')[0] != unitId.split('/')[0] || adId.startsWith('ca-app-pub-3940256099942544'))) {
     throw new GradleException('Supply a production AdMob app ID and rewarded unit ID from the same publisher.')
 }
+def releaseAds = liveAds || reviewTestAds
+def testAppId = 'ca-app-pub-3940256099942544~3347511713'
+def testRewardedId = 'ca-app-pub-3940256099942544/5224354917'
+def testInterstitialId = 'ca-app-pub-3940256099942544/1033173712'
 android {
     namespace 'kr.mangwon.holdem'
     compileSdk 36
@@ -14,18 +26,22 @@ android {
     sourceSets {
         debug.java.srcDir 'src/ads/java'
         debug.manifest.srcFile 'src/ads/AndroidManifest.xml'
-        release.java.srcDir liveAds ? 'src/ads/java' : 'src/noAds/java'
-        if (liveAds) release.manifest.srcFile 'src/ads/AndroidManifest.xml'
+        release.java.srcDir releaseAds ? 'src/ads/java' : 'src/noAds/java'
+        if (releaseAds) release.manifest.srcFile 'src/ads/AndroidManifest.xml'
     }
     buildTypes {
         debug {
-            manifestPlaceholders.adMobAppId = 'ca-app-pub-3940256099942544~3347511713'
-            resValue 'string', 'rewarded_unit', 'ca-app-pub-3940256099942544/5224354917'
+            buildConfigField 'boolean', 'TEST_ADS', 'true'
+            manifestPlaceholders.adMobAppId = testAppId
+            resValue 'string', 'rewarded_unit', testRewardedId
+            resValue 'string', 'daily_interstitial_unit', testInterstitialId
         }
         release {
-            if (liveAds) {
-                manifestPlaceholders.adMobAppId = adId
-                resValue 'string', 'rewarded_unit', unitId
+            buildConfigField 'boolean', 'TEST_ADS', reviewTestAds.toString()
+            if (releaseAds) {
+                manifestPlaceholders.adMobAppId = reviewTestAds ? testAppId : adId
+                resValue 'string', 'rewarded_unit', reviewTestAds ? testRewardedId : unitId
+                resValue 'string', 'daily_interstitial_unit', reviewTestAds ? testInterstitialId : ''
             }
         }
     }
@@ -33,8 +49,8 @@ android {
         applicationId 'kr.mangwon.holdem'
         minSdk 26
         targetSdk 36
-        versionCode 14
-        versionName '0.7.7'
+        versionCode 15
+        versionName '0.7.8'
     }
 }
 dependencies {
@@ -42,7 +58,7 @@ dependencies {
     def consent = 'com.google.android.ump:user-messaging-platform:4.0.0'
     debugImplementation ads
     debugImplementation consent
-    if (liveAds) {
+    if (releaseAds) {
         releaseImplementation ads
         releaseImplementation consent
     }

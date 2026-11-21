@@ -4,6 +4,7 @@ package kr.mangwon.holdem;
 final class RewardAdDesk {
     RewardAdDesk(GameActivity host) {}
     void start() {}
+    boolean sdkReady() { return false; }
     void leave() {}
     boolean privacyRequired() { return false; }
     void privacy() {}

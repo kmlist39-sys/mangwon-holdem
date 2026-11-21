@@ -17,7 +17,7 @@ import android.view.MotionEvent;
 
 /** A painted tracking shot from the stained-glass spade to the neighborhood pub. */
 final class LobbyIntro {
-    static final int DURATION_MS = 4800;
+    private static final int PROMPT_MS = 2870, EXIT_MS = 420;
     private static final int NIGHT = 0xff0f191c;
     private static final float STREET_WIDTH = 1817f, STREET_HEIGHT = 866f;
     private static final float TITLE_WIDTH = 850f, TITLE_HEIGHT = 765f;
@@ -46,10 +46,11 @@ final class LobbyIntro {
     private final LinearGradient foil = new LinearGradient(-110,0,110,32,
         new int[]{0x00fff7d4,0x0ef8d79c,0x9bfff0c1,0x0ef8d79c,0x00fff7d4},
         new float[]{0,.32f,.5f,.68f,1},Shader.TileMode.CLAMP);
-    private Bitmap street, pedestrian, title;
-    private boolean pending, playing, swallowUp, sounded, reducedMotion;
+    private Bitmap street, pedestrian, title, entryPlate;
+    private boolean pending, playing, swallowUp, sounded, reducedMotion, pressed, canStartOnRelease;
     private int requestNumber;
-    private long began;
+    private long lastFrame, playhead, exitAt=-1;
+    private float touchX,touchY;
 
     LobbyIntro(Arena arena) {
         a = arena;
@@ -66,14 +67,10 @@ final class LobbyIntro {
     }
 
     void prepare(boolean eligible) {
-        pending = eligible && ValueAnimator.areAnimatorsEnabled();
+        pending = eligible;
     }
 
-    void ready(boolean hasSession) {
-        if (!pending) return;
-        if (hasSession || !a.host.active) { finish(); return; }
-        load();
-    }
+    void ready() { if(pending)load(); }
 
     void replay() {
         if (!blocking() && a.host.active) load();
@@ -87,6 +84,7 @@ final class LobbyIntro {
             Bitmap scene = a.image("opening-street.webp");
             Bitmap figure = a.image("opening-passerby.webp");
             Bitmap wordmark = a.image("opening-title.webp");
+            Bitmap plate = a.image("opening-entry.webp");
             if (scene != null) scene.prepareToDraw();
             if (figure != null) figure.prepareToDraw();
             if (wordmark != null) wordmark.prepareToDraw();
@@ -96,10 +94,11 @@ final class LobbyIntro {
                 street = scene;
                 pedestrian = figure;
                 title = wordmark;
+                entryPlate = plate;
                 pending = false;
                 playing = true;
                 sounded = false;
-                began = 0;
+                lastFrame=0;playhead=reducedMotion?PROMPT_MS+520:0;exitAt=-1;pressed=false;
                 a.invalidate();
             });
         }, "PubOpeningArt");
@@ -110,21 +109,58 @@ final class LobbyIntro {
     void finish() {
         requestNumber++;
         pending = playing = false;
-        street = pedestrian = title = null;
+        street = pedestrian = title = entryPlate = null;
         a.hits.clear();
         a.invalidate();
     }
 
     boolean blocking() { return pending || playing; }
 
+    void pause(){lastFrame=0;pressed=swallowUp=false;}
+
+    boolean back(){
+        if(!blocking())return false;
+        if(playing&&playhead<PROMPT_MS){playhead=PROMPT_MS+470;a.invalidate();return true;}
+        if(exitAt>=0||pending)return true;
+        finish();return false;
+    }
+
+    private void advance(){
+        if(!playing||exitAt>=0)return;
+        if(playhead<PROMPT_MS)playhead=PROMPT_MS+470;
+        else{
+            if(a.opt.optBoolean("sound"))a.host.fx("tap",.38f);
+            exitAt=playhead;
+            if(reducedMotion){finish();return;}
+        }
+        a.invalidate();
+    }
+
+    boolean keyboardStart(){
+        if(!blocking())return false;
+        advance();return true;
+    }
+
     boolean touch(MotionEvent event) {
         int action = event.getActionMasked();
         if (!blocking() && !swallowUp) return false;
         if (action == MotionEvent.ACTION_DOWN) {
             swallowUp = true;
-            finish();
+            pressed=playing&&exitAt<0;
+            canStartOnRelease=pressed&&playhead>=PROMPT_MS;
+            touchX=event.getX();touchY=event.getY();a.invalidate();
         }
-        if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) swallowUp = false;
+        if(action==MotionEvent.ACTION_MOVE&&pressed){
+            float slop=Math.max(20,a.getHeight()*.047f);
+            if(Math.abs(touchX-event.getX())>slop||Math.abs(touchY-event.getY())>slop)pressed=false;
+        }
+        if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+            if(action==MotionEvent.ACTION_UP&&pressed){
+                if(canStartOnRelease)advance();
+                else{playhead=Math.max(playhead,PROMPT_MS+470);a.invalidate();}
+            }
+            swallowUp=pressed=false;a.invalidate();
+        }
         return true;
     }
 
@@ -291,24 +327,42 @@ final class LobbyIntro {
         a.hits.clear();
     }
 
+    private void startPrompt(Canvas c,int w,int h,long ms){
+        float show=reducedMotion?1:ease(ms,PROMPT_MS-130,PROMPT_MS+330);
+        if(show<=0)return;
+        float left=w*.072f,wide=Math.min(w*.337f,h*1.00f);
+        float high=wide*134/720f,top=Math.min(h*.842f,h*.937f-high);
+        if(pressed&&canStartOnRelease)top+=h*.004f;
+        if(entryPlate!=null)bitmap(c,entryPlate,null,left,top,wide,high,Math.round(255*show));
+        else{paint.setColor(0xeb132e25);target.set(left,top,left+wide,top+high);c.drawRoundRect(target,high*.2f,high*.2f,paint);}
+        float light=reducedMotion?0:.5f+.5f*(float)Math.sin((ms-PROMPT_MS)*.0019);
+        if(!reducedMotion)glow(c,left+.10f*wide,top+.5f*high,wide*.066f,high*.38f,(int)((16+44*light)*show));
+        letters.setTypeface(a.title);letters.setTextAlign(Paint.Align.CENTER);
+        letters.setTextSize(high*.43f);letters.setColor(Color.argb(Math.round(255*show),255,235,194));
+        c.drawText("눌러서 시작하기",left+wide*.56f,top+high*.5f-(letters.ascent()+letters.descent())*.5f,letters);
+        letters.setTextAlign(Paint.Align.LEFT);
+    }
+
     boolean draw(Canvas c, long now) {
         if (!blocking()) return false;
         a.hits.clear();
         if (pending) { c.drawColor(NIGHT); return true; }
-        if (began==0) began=now;
-        long ms=now-began;
-        if (ms>=(reducedMotion?2250:DURATION_MS)) { finish(); return false; }
+        if(a.host.active&&lastFrame!=0)playhead+=Math.max(0,now-lastFrame);
+        lastFrame=a.host.active?now:0;
+        long ms=playhead;
+        if(exitAt>=0&&ms-exitAt>=EXIT_MS){finish();return false;}
         int w=a.getWidth(),h=a.getHeight();
         long shot=reducedMotion?3450:ms;
-        if (shot<4460) {
+        if (exitAt<0||ms-exitAt<EXIT_MS/2) {
             street(c,w,h,shot);
             if (!reducedMotion) { rain(c,w,h,shot); foreground(c,w,h,shot); }
             title(c,w,h,shot);
-            float dark=Math.max(1-ease(shot,0,260),ease(shot,4120,4460));
+            startPrompt(c,w,h,ms);
+            float dark=Math.max(1-ease(shot,0,260),exitAt<0?0:ease(ms-exitAt,0,EXIT_MS/2));
             if (dark>0) c.drawColor((Math.round(255*dark)<<24)|(NIGHT&0x00ffffff));
         } else {
             lobby(c,w,h);
-            float dark=1-ease(ms,4460,DURATION_MS);
+            float dark=1-ease(ms-exitAt,EXIT_MS/2,EXIT_MS);
             c.drawColor((Math.round(255*dark)<<24)|(NIGHT&0x00ffffff));
         }
         if (!sounded && shot>=ENTRANCES[0]) {
@@ -316,8 +370,9 @@ final class LobbyIntro {
             if (a.host.active && a.opt.optBoolean("sound")) a.host.fx("opening",.48f);
         }
         if (a.host.active) {
-            if (reducedMotion) a.postInvalidateDelayed(Math.max(1,2250-ms));
-            else a.postInvalidateOnAnimation();
+            if(!reducedMotion){
+                if(ms>PROMPT_MS+550&&exitAt<0)a.postInvalidateDelayed(32);else a.postInvalidateOnAnimation();
+            }
         }
         return true;
     }

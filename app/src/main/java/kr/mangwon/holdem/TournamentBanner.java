@@ -25,7 +25,9 @@ final class TournamentBanner {
     private final RadialGradient duelBloom = new RadialGradient(0, 0, 1,
             new int[]{0x9b886847,0x4c534640,0x00141c1e},
             new float[]{0,.55f,1}, Shader.TileMode.CLAMP);
-    private Bitmap finalTitle, duelTitle;
+    private Bitmap finalTitle, duelTitle, duelInk;
+    private final HeadsUpLettering duelLettering=new HeadsUpLettering();
+    private final FinalTableLettering finalLettering;
     private boolean loadingFinal, loadingDuel, headsUp, swallowing;
     private int remaining = -1;
     private long sampledAt;
@@ -38,7 +40,7 @@ final class TournamentBanner {
     };
     private final Path trace = new Path();
 
-    TournamentBanner(Arena arena) { this.arena = arena; }
+    TournamentBanner(Arena arena) { this.arena = arena; finalLettering=new FinalTableLettering(arena); }
 
     private static PathMeasure bolt(int... points) {
         Path path = new Path();
@@ -65,8 +67,10 @@ final class TournamentBanner {
         if(duel)loadingDuel=true;else loadingFinal=true;
         Thread loader = new Thread(() -> {
             Bitmap loaded = arena.image(duel?"headsup-title.webp":"final-table-title.webp");
+            Bitmap timeline=duel?arena.image("headsup-ink-time.png"):null;
+            if(!duel&&loaded!=null)finalLettering.prepare(loaded);
             arena.post(() -> {
-                if(duel)duelTitle=loaded;else finalTitle=loaded;
+                if(duel){duelTitle=loaded;duelInk=timeline;}else finalTitle=loaded;
                 arena.invalidate();
             });
         }, "TournamentArt");
@@ -115,10 +119,10 @@ final class TournamentBanner {
             float width = Math.min(w * .86f, h * .72f * ratio) * (.94f + .06f * enter);
             float halfH = width / (2 * ratio);
             titleBounds.set(cx - width / 2, cy - halfH, cx + width / 2, cy + halfH);
-            paint.setColor(0xffffffff);
-            paint.setAlpha((int) (255 * opacity * (headsUp&&animate?ease((t-85)/300):1)));
-            canvas.drawBitmap(title, null, titleBounds, paint);
-            if(headsUp&&animate)drawLightning(canvas,t,width,cx,cy);
+            if(headsUp){
+                duelLettering.draw(canvas,title,duelInk,titleBounds,t,opacity,animate);
+                if(animate)drawLightning(canvas,t,width,cx,cy);
+            }else finalLettering.draw(canvas,title,titleBounds,t,opacity,animate);
         }
     }
 

@@ -4,12 +4,46 @@ import android.graphics.Bitmap;
 import android.graphics.Paint;
 import android.graphics.Rect;
 import android.graphics.RectF;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 /** Consecutive compartments of one painted chip rack double as the shop selection targets. */
 final class Cashier {
     private final Arena a;
     private final Bitmap rack;
+    private int selection;
+    private long pendingPurchase;
     Cashier(Arena arena){a=arena;rack=a.image("cashier-rack.jpg");}
+
+    private JSONObject catalogue(){return a.snapshot.optJSONObject("cashier");}
+    private JSONObject product(int index){
+        JSONObject catalogue=catalogue();
+        JSONArray packs=catalogue==null?null:catalogue.optJSONArray("packs");
+        return packs==null?null:packs.optJSONObject(index);
+    }
+
+    boolean rewardEligible(){
+        return a.snapshot.optBoolean("rewardEligible") &&
+            a.snapshot.optLong("purchaseSequence")>=pendingPurchase &&
+            a.snapshot.optLong("rewardedViews")>=a.host.getPreferences(0).getLong("completedAds",0);
+    }
+
+    void select(int index){
+        if(!"shop".equals(a.panel)||product(index)==null)return;
+        a.host.rewardAds.leave();
+        selection=index;
+        a.panel="confirm";
+    }
+
+    void purchase(){
+        JSONObject item=product(selection);
+        if(!"confirm".equals(a.panel)||item==null)return;
+        long previous=a.snapshot.optLong("purchaseSequence");
+        if(previous<pendingPurchase)return;
+        pendingPurchase=previous+1;
+        a.panel="shop";
+        a.host.command("purchasePack","id",item.optString("id"),"sequence",pendingPurchase);
+    }
 
     void draw(boolean confirm){
         a.hits.clear();a.box(0,0,1080,520,0,0xc00d120f);
@@ -27,27 +61,37 @@ final class Cashier {
         a.txt("내 지갑   "+a.fmt(a.snapshot.optLong("wallet"))+" P",139,109,16,a.paper);
         if(a.host.rewardAds.privacyRequired())a.brass("광고 개인정보",730,48,128,"adPrivacy");
         a.grad(106,322,974,379,0x001b231d,0xff1b231d,true);
-        for(int i=0;i<a.points.length;i++){
-            float x=122+i*211,w=204;
-            if(("pack"+i).equals(a.held))a.box(x,336,x+w,427,6,0xff354237);
-            a.mid(a.shortP(a.points[i])+" P",x+w/2,365,25,a.paper);
-            a.stage.plate(x+29,375,x+w-29,418,0);
-            a.mid(a.fmt(a.prices[i])+"원",x+w/2,403,17,a.gold);
-            a.hit(x,147,x+w,418,"pack"+i);
-        }
         a.txt("모의 충전 · 실제 결제 0원",139,132,13,a.muted);
+        JSONObject catalogue=catalogue();
+        if(catalogue==null)return;
+        JSONObject reward=catalogue.optJSONObject("reward");
+        if(reward==null)return;
         RewardAdDesk ads=a.host.rewardAds;
-        a.line(137,421,943,421,0xff6c6349,1);
-        a.text("50,000 P",139,462,27,a.gold,a.nums,Paint.Align.LEFT);
-        a.txt(ads.caption(),283,458,16,a.paper);
-        if(ads.enabled())a.key(ads.button(),711,430,232,47,"rewardAd",1);
-        else {
-            a.stage.plate(711,430,943,477,0);
-            a.mid(ads.button(),827,460,17,a.muted);
+        boolean eligible=a.snapshot.optBoolean("rewardEligible"), canWatch=ads.enabled()&&rewardEligible();
+        if(!eligible)a.box(123,169,325,324,6,0x80202620);
+        a.mid(a.shortP(reward.optInt("points"))+" P",224,365,25,eligible?a.paper:a.muted);
+        a.stage.plate(143,375,305,418,canWatch?1:0);
+        a.mid(!eligible?"잔액 조건":ads.button(),224,403,16,canWatch?a.ink:a.muted);
+        if(canWatch)a.hit(122,147,326,418,"rewardAd");
+        for(int i=0;i<3;i++){
+            JSONObject item=product(i);
+            if(item==null)continue;
+            float x=122+(i+1)*211,w=204;
+            String target="pack"+i;
+            if(target.equals(a.held))a.box(x,336,x+w,418,6,0xff354237);
+            a.mid(a.shortP(item.optInt("points"))+" P",x+w/2,365,25,a.paper);
+            a.stage.plate(x+29,375,x+w-29,418,0);
+            a.mid(a.fmt(item.optInt("price"))+"원",x+w/2,403,17,a.gold);
+            a.hit(x,147,x+w,418,target);
         }
+        a.line(137,429,943,429,0xff6c6349,1);
+        a.txt("광고 보상  ·  지갑 "+a.shortP(reward.optInt("maxWallet"))+" P 이하에서 이용",139,458,15,a.gold);
+        a.text(eligible?ads.caption():"현재 잔액이 광고 보상 한도를 초과했습니다",940,458,15,a.muted,a.normal,Paint.Align.RIGHT);
     }
     private void detail(){
-        int i=a.pack;
+        JSONObject item=product(selection);
+        if(item==null)return;
+        int i=selection+1;
         if(rack!=null){
             int w=rack.getWidth(),h=rack.getHeight();
             Rect src=new Rect(i*w/4,(int)(.31*h),(i+1)*w/4,(int)(.84*h));
@@ -55,8 +99,8 @@ final class Cashier {
         }
         a.text("충전 확인",138,80,28,a.paper,a.title,Paint.Align.LEFT);
         a.txt("받을 포인트",495,165,16,a.muted);
-        a.text(a.shortP(a.points[i])+" P",491,225,47,a.gold,a.nums,Paint.Align.LEFT);
-        a.txt("설정 가격   "+a.fmt(a.prices[i])+"원",496,270,18,a.paper);
+        a.text(a.shortP(item.optInt("points"))+" P",491,225,47,a.gold,a.nums,Paint.Align.LEFT);
+        a.txt("설정 가격   "+a.fmt(item.optInt("price"))+"원",496,270,18,a.paper);
         a.txt("실제 결제 금액   0원",496,302,18,a.paper);
         a.key("포인트 받기",489,346,264,56,"credit",1);
         a.txt("모의 충전",141,455,15,a.muted);
