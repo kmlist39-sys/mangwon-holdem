@@ -311,27 +311,50 @@ function simulatedScore(h,board){
 
 // Fraction of a board shared by each live hand, before side pots, chips or rake.
 // Only call this with the public snapshot. Never condition a runout on mucked cards.
-let lastPublicEquityKey='',lastPublicEquity=null;
+const publicEquities=new Map();
+// These are the midpoints of the native card flips, when the front first appears.
+function faceUpCount(length,elapsed){
+ if(length===3)return Math.max(0,Math.min(3,1+Math.floor((elapsed-1650)/505)));
+ if(length===4)return elapsed>=852.5?4:3;
+ if(length===5)return elapsed>=1122.5?5:4;
+ return length;
+}
 function showdownEquity(view){
- if(view.showdownTitle||view.pocketTurnMs>=0||view.boardHold>0||view.phase==='suspense')return null;
+ if(view.showdownTitle||view.pocketTurnMs>=0||view.phase==='suspense')return null;
+ if(view.boardHold>0&&!view.allInRunout)return null;
  if(!view.allInRunout&&view.phase!=='showdown'&&view.phase!=='done')return null;
  const live=view.p.filter(p=>!p.fold),size=view.double?3:2;
  if(live.length<2||live.some(p=>p.hole.length!==size))return null;
- const boards=view.board;
+ let boards=view.board;
+ if(view.boardHold>0){
+   const length=boards[0].length;
+   const duration=(length===3?3100:length===4?1160:1520)+(view.double?280:0);
+   const elapsed=duration-1000*view.boardHold;
+   boards=boards.map((b,i)=>b.slice(0,faceUpCount(b.length,elapsed-i*160)));
+ }
  const key=JSON.stringify([view.sessionId,view.hand,live.map(p=>[p.id,p.hole]),boards]);
- if(key===lastPublicEquityKey)return lastPublicEquity;
- const known=new Set(boards.flat());
- for(const p of live)for(const card of p.hole)known.add(card);
- const unseen=Array.from({length:52},(_,i)=>i).filter(c=>!known.has(c));
+ if(publicEquities.has(key))return publicEquities.get(key);
  const seats={};
  for(const p of live)seats[p.id]=[];
- for(const board of boards){
+ for(let row=0;row<boards.length;row++){
+   const board=boards[row];
+   // While the upper card is face up and the lower back still turns,
+   // keep the lower board's last displayed odds until its own face is visible.
+   const known=new Set();
+   for(const p of live)for(const card of p.hole)known.add(card);
+   for(const other of boards){
+     const count=view.boardHold>0?Math.min(other.length,board.length):other.length;
+     for(let i=0;i<count;i++)known.add(other[i]);
+   }
+   const unseen=Array.from({length:52},(_,i)=>i).filter(c=>!known.has(c));
    const shares=boardEquity(live,board,unseen);
    for(let i=0;i<live.length;i++)seats[live[i].id].push(shares[i]);
  }
- lastPublicEquityKey=key;
- lastPublicEquity={seats,approximate:boards.some(b=>b.length<3)};
- return lastPublicEquity;
+ const estimatedRows=boards.map(b=>b.length<3);
+ const result={seats,estimatedRows,approximate:estimatedRows.some(Boolean)};
+ if(publicEquities.size>=24)publicEquities.delete(publicEquities.keys().next().value);
+ publicEquities.set(key,result);
+ return result;
 }
 
 function boardEquity(live,board,unseen){
@@ -566,6 +589,8 @@ function canBuyBack(t){return entryOpen(t)&&state.wallet>=g.buyin}
 // Accounting can run at the opening of showdown. Publish seat changes only
 // after results are public, and keep unrevealed events with the saved table.
 let outgoingTournamentEvents=[];
+const FINAL_TABLE_SECONDS=2.72;
+let finalTableStarted=false;
 function flushTournamentEvents(t){
  for(const event of t.pendingTournamentEvents||[]){
    event.seq=g.tournamentSeq=(g.tournamentSeq||0)+1;
@@ -740,6 +765,7 @@ function closeTable(t){
  for(const p of t.ps){const dest=shortestTable(recipients);sendSeat(p,t,dest,'closure');}
  g.ts=recipients;
  g.lastClosed={number:t.number,remaining:recipients.length};
+ if(!g.cash&&recipients.length===1&&!g.finalTablePlayed)g.finalTablePending=true;
  msg(recipients.length===1?'파이널 테이블 합석':t.number+'번 테이블 종료 · '+recipients.length+'개 테이블 진행');
  return true;
 }
@@ -782,10 +808,21 @@ function betweenHeroHands(t){
    const donor=g.ts.slice(1).reduce((a,b)=>aliveAt(a)>aliveAt(b)?a:b);
    finishOffscreen(donor);if(!closeTable(donor))readyRoster(donor);
  }
- readyRoster(t);
 }
 
-function wrap(rebuyDecision){
+function beginNextHeroHand(t){
+ readyRoster(t);
+ if(breakDue()){
+   g.breakLeft=120;g.rested=true;g.stage='break';return;
+ }
+ dealAt(t);
+}
+
+function beginFinalTable(){
+ g.finalTablePending=false;g.finalTablePlayed=true;g.stage='finalTable';
+ g.finalTableLeft=FINAL_TABLE_SECONDS;finalTableStarted=true;
+}
+function wrap(rebuyDecision,voiceBusy=false){
  const t=g.ts[0],hero=t.ps.find(p=>p.id===-1);
  if(g.cash){
    washCash(t);
@@ -807,10 +844,11 @@ function wrap(rebuyDecision){
    const result=dailyResult(hero);finish(result.text,result.prize);return;
  }
  betweenHeroHands(t);
- if(breakDue()){
-   g.breakLeft=120;g.rested=true;g.stage='break';return;
+ if(g.finalTablePending&&!g.finalTablePlayed&&g.ts.length===1){
+   if(voiceBusy)g.stage='waitingFinalTable';else beginFinalTable();
+   return;
  }
- dealAt(g.ts[0]);
+ beginNextHeroHand(t);
 }
 
 function otherStep(t=g.ts[1]){
@@ -1039,7 +1077,16 @@ function updateFoldReservation(t,request){
  if(request.checked===false){t.preFoldHand=null;return;}
  if(request.checked===true&&canReserveFold(t,t.ps.find(p=>p.id===-1)))t.preFoldHand=t.hand;
 }
-function step(dt,inspecting,holdTable){if(!g)return;
+function step(dt,inspecting,holdTable,voiceBusy=false){if(!g)return;
+ if(g.stage==='waitingFinalTable'){
+   if(!voiceBusy&&!inspecting&&!holdTable)beginFinalTable();
+   return;
+ }
+ if(g.stage==='finalTable'){
+   g.finalTableLeft=Math.max(0,g.finalTableLeft-dt);
+   if(g.finalTableLeft===0){g.stage='playing';beginNextHeroHand(g.ts[0]);}
+   return;
+ }
  if(g.stage==='break'){g.breakLeft-=dt;if(g.breakLeft<=0){g.stage='playing';newRound()}return}
  let t=g.ts[0],done=t.phase==='done';if(done&&g.cash)return;
  if(!g.cash&&(g.rested||g.elapsed<1920))g.elapsed+=dt;
@@ -1059,7 +1106,7 @@ function step(dt,inspecting,holdTable){if(!g)return;
  if(done){
    if(!inspecting){
      t.autoNextLeft=Math.max(0,autoNextRemaining(t)-dt);
-     if(t.autoNextLeft<=.000001)wrap();
+     if(t.autoNextLeft<=.000001)wrap(undefined,voiceBusy);
    }
    return;
  }
@@ -1079,6 +1126,7 @@ function snapshot(){let v={wallet:state.wallet,opt:state.opt,last:state.last,las
  updateBlindNotices();
  const boundary=afterHand(t);
  v.g={nextBlinds:t.nextBlinds||null,canPreFold:!!canReserveFold(t,hero),preFold:!!(t.preFoldHand===t.hand&&foldReservationLive(t,hero)),autoNextLeft:boundary?autoNextRemaining(t):null,afterHand:boundary,wagers:t.wagers||[],lastClosed:g.lastClosed||null,exitQuote:exitQuote(),sessionId:g.exitId,settlement:t.phase==='done'?t.settlement||null:null,cashStats:g.cash?cashStats(t,hero):null,tournament:g.cash?null:tournamentStats(t,hero),leaders:tournamentLeaders(g),lastTransfer:g.lastTransfer||null,quick:own?quickBets(t,hero):null,announcement:t.announcement?.hand===t.hand?t.announcement:null,beforeStreet:t.beforeStreet||0,boardHold:t.boardHold||0,entrants:g.entrants,capacity:g.capacity,tables:g.ts.map(tableInfo),entries:g.cash?0:Math.round(g.pool/g.buyin),rebuyCount:g.cash?0:Math.round(g.pool/g.buyin)-g.entrants,payouts:g.cash?[]:[.5,.3,.2].map(v=>Math.round(g.pool*v)),lastHero:t.lastHero?.hand===t.hand?t.lastHero:null,buyin:g.buyin,pub:g.pub,cash:g.cash,double:g.double,hand:g.count,level:t.level,sb:t.sb,bb:t.bb,pool:g.pool,break:g.stage==='break',breakLeft:g.breakLeft,elapsed:g.elapsed,bank:g.bank,rebuy:g.rebuyAsk,left:g.cash?t.ps.length:g.entrants-g.exits.length,ready:t.phase==='done',phase:visiblePhase(t),pocketTurnMs:t.pocketTurnLeft>0?Math.round(1000*(POCKET_TURN_SECONDS-t.pocketTurnLeft)):-1,showdownTitle:hasShowdownTitle(t),showdownTitleMs:hasShowdownTitle(t)?Math.round(1000*(SHOWDOWN_TITLE_SECONDS-t.titleLeft)):0,allInRunout:!!t.allInRunout,street:t.stage,btn:t.btn,actor:t.actor,sbs:t.sbSeat,bbs:t.bbSeat,timer:g.timer,board:t.boards,feed:t.feed,summary:t.summary,pot:t.ps.reduce((s,q)=>s+q.paid,0),reveal:g.revealed,show:t.reveal,own,call:Math.min(hero.stack,owing(t,hero)),min:Math.min(hero.stack+hero.bet,t.price+t.raise),max:hero.stack+hero.bet,raise:own&&canRaise(t,hero),other:g.ts[1]?.feed||'',ranks:g.revealed&&!t.boardHold?t.boards.filter(b=>b.length).map(b=>label(best(hero.hole,b))):[],p:t.ps.map((p,i)=>({id:p.id,...publicSkill(p),name:nameOf(p.id),rebuys:rebuyCountOf(p),buyin:p.buyin??g.buyin,banked:p.banked||0,move:p.move||null,stack:t.phase==='showdown'&&t.preAward?t.preAward[i]:p.stack,bet:p.bet,fold:p.fold,action:p.action,won:t.phase==='done'?(t.wins[p.id]||0):0,spot:t.phase==='showdown'&&t.lines[t.reveal-1]?.id===p.id,hole:visiblePocket(t,p)})),boardWins:t.double&&t.phase==='done'&&t.lines?.length?t.byBoard.map(w=>Object.keys(w).map(k=>nameOf(+k)).join('·')):[]};
+ if(g.stage==='finalTable')v.g.finalTableMs=Math.round(g.finalTableLeft*1000);
  v.g.equity=showdownEquity(v.g);
  return v;
 }
@@ -1095,13 +1143,14 @@ function applyRewardedAds(completed){
  return true;
 }
 function mobile(raw){let c=JSON.parse(raw),t=g?.ts[0],preFoldConsumed=false;notice='';spoken='';
- if(c.op==='init')outgoingTournamentEvents=[];
- switch(c.op){case 'init':if(c.data){state=JSON.parse(c.data);g=state.g;if(g){for(const savedTable of g.ts)restoreStreetWagers(savedTable);g.revealed=true;g.buyin=g.buyin||50000;g.entrants??=g.cash?g.ts[0].ps.length:16;g.capacity??=g.cash?g.entrants:Math.min(9,g.entrants/2);g.ts.forEach((u,i)=>{u.number??=i+1;if(u.level>REBUY_LEVEL||u.finalRebuyHand)u.registrationClosed=true;if(g.cash)for(const p of u.ps){p.buyin??=g.buyin;p.totalBuyins??=p.buyin;}restorePresentation(u);restoreSettledHand(u)})}}break;case 'save':state.g=g;return JSON.stringify(state);case 'roster':return JSON.stringify(people.map(p=>({...p,history:state.history[p.id]||{n:0,note:''}})));case 'enter':launch(c.pub,c.double,c.buy,c.seats);break;case 'step':preFoldConsumed=step(Math.max(0,Math.min(.8,c.dt)),c.inspect===true,c.holdTable===true)===true;break;case 'prefold':updateFoldReservation(t,c);break;case 'peek':if(g)g.revealed=true;break;case 'act':if((c.session==null||c.session===g?.exitId)&&(c.hand==null||c.hand===g?.count)&&t?.phase==='bet'&&!t.boardHold&&t.ps[t.actor].id===-1&&['fold','call','raise','quarter','half','pot','allin'].includes(c.kind)){
+ if(c.op==='init'){outgoingTournamentEvents=[];finalTableStarted=false;}
+ switch(c.op){case 'init':if(c.data){state=JSON.parse(c.data);g=state.g;if(g){for(const savedTable of g.ts)restoreStreetWagers(savedTable);g.revealed=true;g.buyin=g.buyin||50000;g.entrants??=g.cash?g.ts[0].ps.length:16;g.capacity??=g.cash?g.entrants:Math.min(9,g.entrants/2);g.ts.forEach((u,i)=>{u.number??=i+1;if(u.level>REBUY_LEVEL||u.finalRebuyHand)u.registrationClosed=true;if(g.cash)for(const p of u.ps){p.buyin??=g.buyin;p.totalBuyins??=p.buyin;}restorePresentation(u);restoreSettledHand(u)})}}break;case 'save':state.g=g;return JSON.stringify(state);case 'roster':return JSON.stringify(people.map(p=>({...p,history:state.history[p.id]||{n:0,note:''}})));case 'enter':launch(c.pub,c.double,c.buy,c.seats);break;case 'step':preFoldConsumed=step(Math.max(0,Math.min(.8,c.dt)),c.inspect===true,c.holdTable===true,c.voiceBusy===true)===true;break;case 'prefold':updateFoldReservation(t,c);break;case 'peek':if(g)g.revealed=true;break;case 'act':if((c.session==null||c.session===g?.exitId)&&(c.hand==null||c.hand===g?.count)&&t?.phase==='bet'&&!t.boardHold&&t.ps[t.actor].id===-1&&['fold','call','raise','quarter','half','pot','allin'].includes(c.kind)){
  let key=c.kind,p=t.ps[t.actor],preset=quickBets(t,p)[key];
  if(preset&&!preset.enabled)break;
  let kind=preset?(key==='allin'&&owing(t,p)>=p.stack?'call':'raise'):key;
  let total=preset&&key!=='raise'?preset.target:(c.amount||0);
- if(!act(t,kind,total,preset?key:undefined))break;t.preFoldHand=null;g.timer=ACTION_SECONDS;delay=t.phase==='showdown'?1.82:.7}break;case 'next':if(t?.phase==='done'&&!g.rebuyAsk&&g.stage==='playing'&&(c.hand==null||c.hand===g.count))wrap();break;case 're':if(g?.rebuyAsk)wrap(c.yes);break;case 'skip':if(g?.stage==='break'){g.stage='playing';newRound()}break;case 'surrender':surrender(c.token);break;case 'leave':if(g?.cash&&g.count>=6&&t.phase==='done')cashExit('cashSettled');break;case 'pack':if([50000,200000,400000,700000].includes(c.points))state.wallet+=c.points;break;case 'day':if(!g&&state.wallet===0)state.wallet=50000;break;case 'option':if(c.name==='speed')state.opt.speed=state.opt.speed===1?2:1;else if(['sound','voice','timing','peek'].includes(c.name))state.opt[c.name]=!state.opt[c.name];break}
+ if(!act(t,kind,total,preset?key:undefined))break;t.preFoldHand=null;g.timer=ACTION_SECONDS;delay=t.phase==='showdown'?1.82:.7}break;case 'next':if(t?.phase==='done'&&!g.rebuyAsk&&g.stage==='playing'&&(c.hand==null||c.hand===g.count))wrap(undefined,c.voiceBusy===true);break;case 're':if(g?.rebuyAsk)wrap(c.yes,c.voiceBusy===true);break;case 'skip':if(g?.stage==='break'){g.stage='playing';newRound()}break;case 'surrender':surrender(c.token);break;case 'leave':if(g?.cash&&g.count>=6&&t.phase==='done')cashExit('cashSettled');break;case 'pack':if([50000,200000,400000,700000].includes(c.points))state.wallet+=c.points;break;case 'day':if(!g&&state.wallet===0)state.wallet=50000;break;case 'option':if(c.name==='speed')state.opt.speed=state.opt.speed===1?2:1;else if(['sound','voice','timing','peek'].includes(c.name))state.opt[c.name]=!state.opt[c.name];break}
  const rewardApplied=(c.op==='init'||c.op==='rewardedAd')&&applyRewardedAds(c.completedAds);
  const view=snapshot();if(rewardApplied)view.rewardApplied=true;if(preFoldConsumed)view.preFoldConsumed=true;view.tournamentEvents=outgoingTournamentEvents;outgoingTournamentEvents=[];
+ if(finalTableStarted){view.finalTableStarted=true;finalTableStarted=false;}
  return JSON.stringify(view)}

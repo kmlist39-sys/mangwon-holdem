@@ -542,5 +542,9 @@
   "tournament:rebought": [
     "v135",
     1705
+  ],
+  "final-table": [
+    "final_table",
+    2030
   ]
 }

@@ -3,7 +3,7 @@
   "model": "gemini-3.8-flash-tts",
   "voice": "Veda",
   "voiceId": "Veda",
-  "count": 136,
+  "count": 137,
   "coverage": 710,
   "outcomeCoverage": 326,
   "complete": true,
@@ -143,7 +143,8 @@
     "v132": "22cfb1df2a37801d226cc142c6843d5a900660909603d8ad40d055311a3ea3f8",
     "v133": "12f4506126f4182ce3870813b350d269261c6de2b5fbd7a37e439efa2353b8a2",
     "v134": "bd696917aed719262446456d9fac6d7bfc2a09ced75ccfa27d6233bb53a4fb2a",
-    "v135": "ba93c996b1feb0ed5f833475fde31c03ad5e68f6a31288d6ad565a7009eda864"
+    "v135": "ba93c996b1feb0ed5f833475fde31c03ad5e68f6a31288d6ad565a7009eda864",
+    "final_table": "7c65c32fafd5ef0d5edd5ce84766fb5d7162b322967d14004ba5479ffef8f3b7"
   },
   "locale": "ko-KR",
   "sampleRateHz": 24000,

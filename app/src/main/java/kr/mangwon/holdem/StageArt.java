@@ -105,6 +105,8 @@ final class StageArt {
         if(!amount.isEmpty()){a.box(x-35,y0+16,x+35,y0+33,8,0xf5223130);a.mid(amount,x,y0+29,13,a.paper);}
         a.hit(x-55,y-35,x+55,y+36,id);
     }
+    void heroWagerHand(){chips.hand();}
+
     void heroGesture(){
         if(gesture<0||a.deal.running())return;
         long age=a.now-gestureAt;

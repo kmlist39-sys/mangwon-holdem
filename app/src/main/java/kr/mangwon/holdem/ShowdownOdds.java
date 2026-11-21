@@ -35,7 +35,7 @@ final class ShowdownOdds {
         JSONObject equity=a.g.optJSONObject("equity");
         if (equity==null || player.optBoolean("fold") || a.deal.running()
             || a.g.optBoolean("showdownTitle") || a.g.optInt("pocketTurnMs",-1)>=0
-            || a.g.optDouble("boardHold",0)>0 || "suspense".equals(a.g.optString("phase"))) return;
+            || "suspense".equals(a.g.optString("phase"))) return;
         boolean both=a.g.optBoolean("double");
         JSONArray hole=player.optJSONArray("hole");
         if (hole==null || hole.length()!=(both?3:2)) return;
@@ -43,8 +43,9 @@ final class ShowdownOdds {
         JSONArray shares=seats==null?null:seats.optJSONArray(player.optString("id"));
         if (shares==null || shares.length()!=(both?2:1)) return;
         boolean estimate=equity.optBoolean("approximate");
-        String first=percent(shares.optDouble(0),estimate);
-        String second=both?percent(shares.optDouble(1),estimate):"";
+        JSONArray estimates=equity.optJSONArray("estimatedRows");
+        String first=percent(shares.optDouble(0),estimates==null?estimate:estimates.optBoolean(0));
+        String second=both?percent(shares.optDouble(1),estimates==null?estimate:estimates.optBoolean(1)):"";
         if (first.isEmpty() || (both && second.isEmpty())) return;
 
         if (hero) {

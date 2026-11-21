@@ -134,13 +134,13 @@ final class OpponentHands {
         arena.c.translate(elbowX,elbowY);arena.c.rotate(angle);
         arena.c.clipRect(-size*1.2f,-reach-size,size*1.2f,1);
         arena.c.rotate(-angle);arena.c.translate(tipX-elbowX,tipY-elbowY);
-        arena.c.rotate(angle+(check?tap*7:5*(1-enter)-4*release));
-        int opacity=(int)(255*ease(age,0,120));
-        int base=check?0:raise?8:5;
-        float crop=check?0:raise?.30f:.20f;
-        float change=check?tap:release;
-        if(change<1)stage.rightHand(base,crop,-size*.5f,-size*.13f,size,size,(int)(opacity*(1-change)));
-        if(change>0)stage.rightHand(check?1:11,0,-size*.5f,-size*.13f,size,size,(int)(opacity*change));
+        float followThrough=release*(1-leave);
+        arena.c.rotate(angle+(check?tap*7:5*(1-enter)-(raise?8:4)*followThrough));
+        // Use one bare right hand for the whole stroke. Contact changes wrist angle
+        // and foreshortening; the separate chips stay at their point of release.
+        arena.c.scale(1+(check?tap*.018f:followThrough*.025f),
+                      1-(check?tap*.065f:followThrough*.035f));
+        stage.rightHand(check?0:11,0,-size*.5f,-size*.13f,size,size,255);
         arena.c.restore();
     }
 }

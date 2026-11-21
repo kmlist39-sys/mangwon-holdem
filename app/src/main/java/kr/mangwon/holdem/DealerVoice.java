@@ -32,6 +32,7 @@ final class DealerVoice {
 
     DealerVoice(GameActivity activity){this.activity=activity;bank=new GeminiBank(activity);}
     boolean ready(){return bank.ready();}
+    boolean busy(){return playing!=null||prefetched!=null||!pending.isEmpty()||!recorded.isEmpty();}
     String status(){return bank.status();}
     void preview(){
         if(!ready()){activity.arena.note(status());return;}
@@ -66,6 +67,7 @@ final class DealerVoice {
         enabled=activity.arena.screen.equals("table")&&voiceOn;
         if(!enabled&&!previewing)stop();
         if(observed&&enabled&&ready()){
+            if(snapshot.optBoolean("finalTableStarted"))add(new DealerLine("파이널 테이블입니다.","final-table"));
             if(action!=null&&action.optInt("hand",hand)==hand&&(seenHand!=hand||seq!=seenAction)){
                 String kind=action.optString("kind");add(new DealerLine(OutcomeAnnouncement.action(kind),"full".equals(kind)?"pot":kind));
             }

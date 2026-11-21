@@ -49,13 +49,15 @@ public final class GameActivity extends Activity {
         if(!isDestroyed())command("rewardedAd","completedAds",completed);
     }
     void command(String op,Object... values){
-        JSONObject j=args(values);try{j.put("op",op);}catch(JSONException e){return;}
+        JSONObject j=args(values);try{j.put("op",op);
+            if(op.equals("step")||op.equals("next")||op.equals("re"))j.put("voiceBusy",dealerVoice.busy());
+        }catch(JSONException e){return;}
         boolean tick=op.equals("step");if(tick)pending=true;
         worker.post(()->{
             try{
                 JSONObject state=new JSONObject(call(j.toString()));
                 long now=SystemClock.uptimeMillis();
-                if(!tick||state.optBoolean("preFoldConsumed")||cashWaitsForInput(state.optJSONObject("g"),state.optJSONObject("opt"))||now-lastSave>=2500){persist();lastSave=now;}
+                if(!tick||state.optBoolean("preFoldConsumed")||state.optBoolean("finalTableStarted")||cashWaitsForInput(state.optJSONObject("g"),state.optJSONObject("opt"))||now-lastSave>=2500){persist();lastSave=now;}
                 JSONArray roster=op.equals("next")||op.equals("enter")?new JSONArray(call("{\"op\":\"roster\"}")):null;
                 ui.post(()->{
                     if(isDestroyed())return;
