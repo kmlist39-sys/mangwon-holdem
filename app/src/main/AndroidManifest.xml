@@ -1,0 +1,10 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application android:label="망원동 홀덤" android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen" android:icon="@mipmap/club_launcher" android:roundIcon="@mipmap/club_launcher_round" android:allowBackup="false" android:usesCleartextTraffic="false">
+        <activity android:name=".GameActivity" android:theme="@style/PubEntrance" android:exported="true" android:screenOrientation="sensorLandscape" android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation|keyboardHidden">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

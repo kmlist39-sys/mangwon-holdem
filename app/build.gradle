@@ -1,0 +1,49 @@
+plugins { id 'com.android.application' }
+def adId = providers.gradleProperty('mangwonAdMobAppId').orElse(providers.environmentVariable('MANGWON_ADMOB_APP_ID')).getOrElse('')
+def unitId = providers.gradleProperty('mangwonRewardedUnitId').orElse(providers.environmentVariable('MANGWON_REWARDED_UNIT_ID')).getOrElse('')
+def liveAds = !adId.isEmpty() || !unitId.isEmpty()
+if (liveAds && (!(adId ==~ /ca-app-pub-[0-9]{16}~[0-9]{10}/) ||
+        !(unitId ==~ /ca-app-pub-[0-9]{16}\/[0-9]{10}/) ||
+        adId.split('~')[0] != unitId.split('/')[0] || adId.startsWith('ca-app-pub-3940256099942544'))) {
+    throw new GradleException('Supply a production AdMob app ID and rewarded unit ID from the same publisher.')
+}
+android {
+    namespace 'kr.mangwon.holdem'
+    compileSdk 36
+    buildFeatures { buildConfig true }
+    sourceSets {
+        debug.java.srcDir 'src/ads/java'
+        debug.manifest.srcFile 'src/ads/AndroidManifest.xml'
+        release.java.srcDir liveAds ? 'src/ads/java' : 'src/noAds/java'
+        if (liveAds) release.manifest.srcFile 'src/ads/AndroidManifest.xml'
+    }
+    buildTypes {
+        debug {
+            manifestPlaceholders.adMobAppId = 'ca-app-pub-3940256099942544~3347511713'
+            resValue 'string', 'rewarded_unit', 'ca-app-pub-3940256099942544/5224354917'
+        }
+        release {
+            if (liveAds) {
+                manifestPlaceholders.adMobAppId = adId
+                resValue 'string', 'rewarded_unit', unitId
+            }
+        }
+    }
+    defaultConfig {
+        applicationId 'kr.mangwon.holdem'
+        minSdk 26
+        targetSdk 36
+        versionCode 11
+        versionName '0.7.4'
+    }
+}
+dependencies {
+    def ads = 'com.google.android.gms:play-services-ads:25.5.0'
+    def consent = 'com.google.android.ump:user-messaging-platform:4.0.0'
+    debugImplementation ads
+    debugImplementation consent
+    if (liveAds) {
+        releaseImplementation ads
+        releaseImplementation consent
+    }
+}
