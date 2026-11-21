@@ -9,6 +9,7 @@ import java.io.*;
 import java.util.*;
 
 public final class Arena extends View {
+ static final String LOBBY_SLOGAN="동네에서 즐기는 방식 그대로";
  final PubDisplay display; final Cashier cashier; final PotReceipt receipt=new PotReceipt();
  final WashMotion washMotion=new WashMotion(this);
  final SettlementMotion payouts=new SettlementMotion(this);
@@ -33,7 +34,7 @@ public final class Arena extends View {
      outlines=new Paint(Paint.ANTI_ALIAS_FLAG),lines=new Paint(Paint.ANTI_ALIAS_FLAG);
  private final LinearGradient hudTop=new LinearGradient(0,0,0,72,0xfc111c17,0x07111c17,Shader.TileMode.CLAMP);
  private final LinearGradient hudBottom=new LinearGradient(0,409,0,520,0x00101814,0xfa101813,Shader.TileMode.CLAMP);
- private final Rect atlasSource=new Rect();
+ final SeatActing acting;
  private final ArrayList<Hit> hitPool=new ArrayList<>();
  private final android.util.LongSparseArray<String> numbers=new android.util.LongSparseArray<>();
  private final java.text.NumberFormat commaFormat=java.text.NumberFormat.getIntegerInstance(Locale.US);
@@ -42,7 +43,7 @@ public final class Arena extends View {
  final ArrayList<Hit> hits=new ArrayList<>(); String screen="lobby",panel="",toast="",prevPhase="",lastFeed="";int venue=0,buy=200000,profile=0,page=0,pack=0,lastHand=-1,lastStreet=-1,raise=0,chipSeat=-2,focused=-2;boolean dbl=false,shopFromEntry=false;
  long now,born=SystemClock.uptimeMillis(),dealAt,boardAt,phaseAt,chipAt,focusAt,toastEnd;float scale=1,offX,offY,pressX,pressY,peel;String held="",pressSession="";int pressHand;boolean drag;
  static class Hit{RectF r;String key;Hit(float l,float t,float r,float b,String k){this.r=new RectF(l,t,r,b);key=k;}}
- Arena(GameActivity a){super(a);host=a;pub=image("title.jpg");pubMenu=new PubMenu(this);table=image("nine-room.jpg");busts=image("busts.png");deal.dealer=image("dealer.png");chipArt=image("chips.png");betPose=image("betpose.png");faces=image("faces.jpg");calm=image("calm.jpg");stage=new StageArt(this);character=new CharacterProfile(this);display=new PubDisplay(this);cashier=new Cashier(this);setFocusable(true);}
+ Arena(GameActivity a){super(a);host=a;pub=image("title.jpg");pubMenu=new PubMenu(this);table=image("nine-room.jpg");busts=image("busts.png");deal.dealer=image("dealer.png");chipArt=image("chips.png");betPose=image("betpose.png");faces=image("faces.jpg");calm=image("calm.jpg");stage=new StageArt(this);acting=new SeatActing(this);character=new CharacterProfile(this);display=new PubDisplay(this);cashier=new Cashier(this);setFocusable(true);}
  Bitmap image(String n){try(InputStream in=host.getAssets().open(n)){return BitmapFactory.decodeStream(in);}catch(IOException e){return null;}}
  boolean tableOpen(){return screen.equals("table")&&(panel.isEmpty()||panel.equals("tables")||panel.equals("wagers")||panel.equals("receipt")||panel.equals("profile"))&&g!=null;}
  boolean live(){return tableOpen()&&!deal.running();}
@@ -57,12 +58,14 @@ public final class Arena extends View {
  void accept(JSONObject v){try{JSONObject old=g;snapshot=v;g=v.optJSONObject("g");opt=v.getJSONObject("opt");String msg=v.optString("notice");if(!msg.isEmpty())note(msg);if(old!=null&&g==null){screen="lobby";panel="result";}
  pocketTurnSampleAt=SystemClock.uptimeMillis();
  blindTicker.observe(g,pocketTurnSampleAt);
+ if(old!=null&&g==null)acting.clear();
  washMotion.observe(old,g,SystemClock.uptimeMillis(),host.active&&screen.equals("table")&&panel.isEmpty());
  stage.rebuys.observe(old,g,v.optJSONArray("tournamentEvents"),SystemClock.uptimeMillis());
  if(g!=null){stage.onSnapshot(old,g);int h=g.optInt("hand"),st=g.optInt("street");String ph=g.optString("phase"),feed=g.optString("feed");long t=SystemClock.uptimeMillis();payouts.observe(old,g,t);
  boolean newHand=old==null||h!=lastHand||!g.optString("sessionId").equals(old.optString("sessionId"));
  if(newHand){dealAt=t;boardAt=t;deal.begin(g,screen.equals("table"));chipSeat=-2;lastHand=h;Arrays.fill(foldStarted,0);peel=0;raise=0;if(opt.optBoolean("sound"))host.fx("deal",.65f);}
  folds.observe(old,g,t,newHand);
+ acting.observe(g,t,newHand);
  if(st!=lastStreet){boardAt=t;lastStreet=st;if(opt.optBoolean("sound"))host.fx("deal",.8f);}
  boolean enteringTitle=g.optBoolean("showdownTitle")&&(old==null||h!=old.optInt("hand")||!old.optBoolean("showdownTitle"));
  if(!ph.equals(prevPhase)||enteringTitle){phaseAt=enteringTitle?t-g.optLong("showdownTitleMs",0):t;prevPhase=ph;}
@@ -109,7 +112,49 @@ public final class Arena extends View {
      line(x+18,y+7,x+24,y+9,color,2f);if(!on)line(x+8,y+7,x+26,y+24,color,1.8f);
      mid(on?"음악 켬":"음악 끔",x+53,y+21,12,color);hit(x-1,y-6,x+85,y+37,"music");
  }
- @Override protected void onDraw(Canvas canvas){super.onDraw(canvas);c=canvas;now=SystemClock.uptimeMillis();if(intro.draw(canvas,now))return;deal.update(now,host.active&&screen.equals("table")&&panel.isEmpty());int w=getWidth(),h=getHeight();boolean dock=screen.equals("table")&&g!=null;int playHeight=dock?Math.max(1,h-stage.bet.dockPixels()):h;scale=Math.min(w/1080f,playHeight/520f);offX=(w-1080*scale)/2;offY=Math.min((h-520*scale)/2,playHeight-520*scale);boolean room=screen.equals("table")||panel.equals("entry");c.drawColor(ink);if(!room)pubMenu.backdrop(w,h);c.save();c.translate(offX,offY);c.scale(scale,scale);c.clipRect(0,0,1080,520);hits.clear();if(room)photo(stage.place.backdrop(),0,0,1080,520);stage.ambience();if(panel.equals("entry")&&venue<2){dailyBuyIn();}else{if(screen.equals("table")&&g!=null)game();else lobby();if(panel.equals("tables"))display.draw();else if(panel.equals("receipt"))receipt.draw(this);else if(panel.equals("shop")||panel.equals("confirm"))cashier.draw(panel.equals("confirm"));else if(panel.equals("profile"))character.draw();else if(panel.equals("wagers"))wages.detail();else if(!panel.isEmpty())overlay();}if(now<toastEnd){float tw=Math.min(860,Math.max(230,toast.length()*14));box(540-tw/2,10,540+tw/2,43,15,0xf4eadbbd);mid(toast,540,32,15,ink);}c.restore();if(dock){c.save();c.translate(offX,offY);c.scale(scale,scale);stage.bet.rail();c.restore();}host.frame(now);if(host.active){if(screen.equals("lobby")&&panel.isEmpty())pubMenu.schedule();else postInvalidateOnAnimation();}}
+ @Override protected void onDraw(Canvas canvas){
+     super.onDraw(canvas);
+     c=canvas;
+     now=SystemClock.uptimeMillis();
+     if(intro.draw(canvas,now))return;
+     boolean tableScreen=screen.equals("table")&&g!=null;
+     boolean room=tableScreen||panel.equals("entry");
+     deal.update(now,host.active&&tableScreen&&panel.isEmpty());
+     int w=getWidth(),h=getHeight();
+     int playHeight=tableScreen?Math.max(1,h-stage.bet.dockPixels()):h;
+     scale=Math.min(w/1080f,playHeight/520f);
+     offX=(w-1080*scale)/2;
+     offY=Math.min((h-520*scale)/2,playHeight-520*scale);
+     c.drawColor(ink);
+     if(!room)pubMenu.backdrop(w,h);
+     c.save();c.translate(offX,offY);c.scale(scale,scale);
+     if(tableScreen||!panel.isEmpty())c.clipRect(0,0,1080,520);
+     hits.clear();
+     if(room){photo(stage.place.backdrop(),0,0,1080,520);stage.ambience();}
+     if(panel.equals("entry")&&venue<2)dailyBuyIn();
+     else{
+         if(tableScreen)game();
+         else if(!room)lobby();
+         if(panel.equals("tables"))display.draw();
+         else if(panel.equals("receipt"))receipt.draw(this);
+         else if(panel.equals("shop")||panel.equals("confirm"))cashier.draw(panel.equals("confirm"));
+         else if(panel.equals("profile"))character.draw();
+         else if(panel.equals("wagers"))wages.detail();
+         else if(!panel.isEmpty())overlay();
+     }
+     if(now<toastEnd){
+         float tw=Math.min(860,Math.max(230,toast.length()*14));
+         box(540-tw/2,10,540+tw/2,43,15,0xf4eadbbd);
+         mid(toast,540,32,15,ink);
+     }
+     c.restore();
+     if(tableScreen){c.save();c.translate(offX,offY);c.scale(scale,scale);stage.bet.rail();c.restore();}
+     host.frame(now);
+     if(host.active){
+         if(screen.equals("lobby")&&panel.isEmpty())pubMenu.schedule();
+         else postInvalidateOnAnimation();
+     }
+ }
  void lobby(){pubMenu.draw();}
  // Anchors on the painted armrest of the 1080 x 520 room, ordered around the table.
  // The flank seats are on its outer ends, the rear seats follow its far rim.
@@ -170,8 +215,7 @@ public final class Arena extends View {
  }
  float foldFade(int id){
      long start=foldStarted[id+1];if(start==0)return 1;
-     float u=Math.max(0,Math.min(1,(now-start)/340f));
-     return u*u*(3-2*u);
+     return SeatActing.foldShade(now-start);
  }
  void chip(float x,float y,int count,int col){int n=Math.max(1,Math.min(count,7));for(int i=0;i<n;i++){float yy=y-i*2.4f;reset(col);c.drawOval(x-9,yy-3.4f,x+9,yy+3.4f,p);reset(0xffead3a7);p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(.9f);c.drawOval(x-8,yy-3.1f,x+8,yy+2.7f,p);line(x-5,yy+1,x-4,yy+3,paper,1.7f);}}
  void card(int v,float x,float y,float w,float h,float angle,boolean back){
@@ -195,13 +239,14 @@ public final class Arena extends View {
  JSONArray ps=g.optJSONArray("p"),boards=g.optJSONArray("board");int hero=0;for(int i=0;i<ps.length();i++)if(ps.optJSONObject(i).optInt("id")==-1)hero=i;
  boolean db=g.optBoolean("double");int pot=g.optInt("pot");
  folds.draw(ps,hero,db);
+ stage.opponents.draw(ps,hero);
  stage.chips.pot();payouts.chips();
  community.draw(boards,db,BOARD_TOP);
  for(int i=0;i<ps.length();i++){JSONObject q=ps.optJSONObject(i);int pos=(i-hero+ps.length())%ps.length();if(pos==0)continue;float[] xy=position(pos,ps.length());seat(q,i,xy[0],xy[1],SEAT_MASKS[ps.length()][pos]);}
- if(chipSeat>=0&&chipSeat!=hero&&chipSeat<ps.length()&&now-chipAt<520){float f=Math.min(1,(now-chipAt)/520f);float[] xy=position((chipSeat-hero+ps.length())%ps.length(),ps.length());for(int k=0;k<3;k++)chip(xy[0]+(POT_X-xy[0])*f+k*5,xy[1]+(POT_Y-xy[1])*f-18*(float)Math.sin(f*Math.PI),2,0xffb8684c);}
  JSONObject me=ps.optJSONObject(hero);JSONArray hole=me.optJSONArray("hole");deal.draw(ps,hero,hole);
  String rank="";JSONArray rr=g.optJSONArray("ranks");for(int j=0;j<rr.length();j++)rank+=(j==0?"":"  /  ")+rr.optString(j);if(db&&rr.length()==2)rank="위 "+rr.optString(0)+"  ·  아래 "+rr.optString(1);if(!deal.running()&&g.optDouble("boardHold")==0&&!g.optString("phase").equals("showdown"))mid(rank,820,388,13,gold);
  nameClock.paint(333,391,451,417,g.optBoolean("own")&&!deal.running(),0,me.optBoolean("fold")?FOLD_TONES[Math.round(6*foldFade(-1))]:null);mid("나   "+fmt(me.optInt("stack")),392,409,15,paper);chip(323,412,5,0xffb15346);chip(309,416,3,0xff637c83);
+ ShowdownOdds.hero(this,me);
  String feed=g.optString("feed");stage.tableTicker();stage.chips.call();stage.heroGesture();stage.bet.badge(me,392,419,108);payouts.labels();
  String phase=g.optString("phase");if(deal.running()){}else if(g.optBoolean("rebuy")){key("대회 종료",698,446,134,52,"decline",0);boolean funded=snapshot.optInt("wallet")>=g.optInt("buyin");key(funded?shortP(g.optInt("buyin",50000))+"P 리바인":"포인트 충전",842,446,215,52,funded?"re":"shop",1);}
  else if(g.optBoolean("break")){key("휴식 종료",842,446,215,52,"skip",1);mid("휴식  "+(int)g.optDouble("breakLeft")+"초",541,484,23,paper);}
@@ -220,24 +265,8 @@ public final class Arena extends View {
      boolean folded=q.optBoolean("fold"),win=q.optInt("won")>0;
      boolean active=!deal.running()&&g.optString("phase").equals("bet")&&g.optInt("actor")==idx;
      // The far side is smaller in perspective. Leave clear space for the HUD above every head.
-     float size=seatSize(y),top=y-size,left=x-size/2,plateTop=plateY(x,y);
-     float motion=chipSeat==idx?Math.max(0,1-(now-chipAt)/850f):0;
-     float reach=(float)Math.sin(Math.PI*motion)*5;
-     float breath=(float)Math.sin(now/820.0+id*2)*.8f;
-     Bitmap body=betPose!=null&&(motion>.08f||win||q.optBoolean("spot"))?betPose:busts;
-     c.save();
-     c.clipPath(seatMask);
-     float entering=stage.rebuys.entering(id);
-     if(entering>0)c.translate((x<540?-1:1)*11*entering,16*entering);
-     if(body!=null){
-         int frame=artMap[id],sx=frame%10,sy=frame/10;
-         atlasSource.set(sx*body.getWidth()/10,sy*body.getHeight()/5,(sx+1)*body.getWidth()/10,(sy+1)*body.getHeight()/5);
-         reset(-1);if(folded)p.setColorFilter(FOLD_TONES[Math.round(16*foldFade(id))]);
-         c.rotate((x<540?1:-1)*reach*.6f,x,y);
-         rect.set(left-reach*.25f,top+breath+reach*.3f,left+size+reach*.25f,y+5+reach);
-         c.drawBitmap(body,atlasSource,rect,p);
-     }else person(id,left,top,size,win);
-     c.restore();
+     float size=seatSize(y),top=y-size,plateTop=plateY(x,y);
+     acting.draw(q,x,y,size,seatMask,active);
      nameClock.paint(x-49,plateTop-1,x+49,plateTop+30,active,win?1:0,folded?FOLD_TONES[Math.round(6*foldFade(id))]:null);
      int textColor=win?ink:folded?muted:paper;
      boolean master=q.optInt("tier")==2;
@@ -272,6 +301,7 @@ public final class Arena extends View {
          card(hole.optInt(j),-POCKET_WIDTH/2,-POCKET_HEIGHT/2,POCKET_WIDTH,POCKET_HEIGHT,0,u<.5f);c.restore();
      }
 
+     ShowdownOdds.seat(this,q,x,plateTop);
      hit(x-Math.max(50,size/2),top,x+Math.max(50,size/2),plateTop+53,"person"+id);
  }
  void actionChip(float x,float y,String label,String amount,String id,int color){stage.button(x,y,label,amount,id);}
@@ -335,6 +365,7 @@ public final class Arena extends View {
  @Override public boolean performClick(){super.performClick();return true;}
  void action(String a){if(a.isEmpty()||!host.loaded)return;if(opt.optBoolean("sound")&&!a.equals("peek"))host.fx("tap",.26f);
  if(a.equals("voiceSample")){host.dealerVoice.preview();return;}
+ if(a.equals("replayIntro")&&screen.equals("lobby")&&panel.isEmpty()){intro.replay();return;}
  if(a.startsWith("exit@")){if(panel.equals("surrender"))host.command("surrender","token",a.substring(5));return;}
  if(a.startsWith("fee")){fee=PubMenu.FEES[venue][Integer.parseInt(a.substring(3))];feeChangedAt=now;return;}if(a.startsWith("venue")){venue=Integer.parseInt(a.substring(5));if(venue<2)fee=PubMenu.FEES[venue][0];feeChangedAt=now;action("entry");return;}if(a.startsWith("person")){int id=Integer.parseInt(a.substring(6));if(id>=0&&id<people.length()){profile=id;profileReturn=panel.equals("tables")?"tables":"";panel="profile";host.refreshPeople();}return;}if(a.startsWith("opt:")){host.command("option","name",a.substring(4));return;}if(a.startsWith("pack")){host.rewardAds.leave();pack=Integer.parseInt(a.substring(4));panel="confirm";return;}if(a.startsWith("size")){int i=Integer.parseInt(a.substring(4)),min=g.optInt("min"),max=g.optInt("max"),base=g.optInt("call")+g.optJSONArray("p").optJSONObject(0).optInt("bet");raise=i==0?min:i==3?max:Math.max(min,Math.min(max,base+g.optInt("pot")/(i==1?2:1)));return;}
  switch(a){case "entry":if(g!=null){screen="table";panel="";}else{if(snapshot.optInt("wallet")==0)host.command("day");buy=Math.min(700000,Math.max(200000,Math.min(buy,snapshot.optInt("wallet"))));panel="entry";}break;

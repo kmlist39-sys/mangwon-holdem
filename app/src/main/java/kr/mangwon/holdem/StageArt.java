@@ -10,6 +10,7 @@ final class StageArt {
     final Arena a;final BetArt bet; final TitleSequence title; final RectF dst=new RectF(); final Rect srcRect=new Rect(); final long[] badgeTime=new long[50];
     final Bitmap buttons, trim, showdown, hands, props, bartender;
     final VenueScene place;final ChipMotion chips;final RebuyEntrance rebuys;
+    final OpponentHands opponents;
     long accepted, gestureAt, revealAt;
     private long titleElapsed, lastTitleFrame;
     final int[] tableOrder=new int[4];
@@ -17,6 +18,7 @@ final class StageArt {
     int gesture=-1, serial=-1, hand=-1, shown=-1;
     StageArt(Arena arena){
         a=arena;buttons=a.image("controls.png");trim=a.image("trim.png");
+        opponents=new OpponentHands(this);
         showdown=a.image("showdown.png");hands=a.image("gestures.png");props=a.image("ambience.png");bartender=a.image("bartender.png");title=new TitleSequence(this);bet=new BetArt(this);place=new VenueScene(a);chips=new ChipMotion(this);rebuys=new RebuyEntrance(this);
     }
     void tile(Bitmap b,int columns,int rows,int i,float l,float t,float r,float d){
@@ -51,6 +53,7 @@ final class StageArt {
     }
     void onSnapshot(JSONObject old,JSONObject g){
         accepted=SystemClock.uptimeMillis();chips.observe(old,g,accepted);orderTables(g.optJSONArray("tables"));
+        opponents.observe(old,g,accepted);
         if(g.optBoolean("showdownTitle") && (old==null || old.optInt("hand")!=g.optInt("hand") || !old.optBoolean("showdownTitle"))){
             titleElapsed=g.optLong("showdownTitleMs",0);
             lastTitleFrame=0;

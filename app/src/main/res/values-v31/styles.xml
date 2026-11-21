@@ -1,7 +1,7 @@
 <resources>
     <style name="PubEntrance" parent="@android:style/Theme.Material.NoActionBar.Fullscreen">
-        <item name="android:windowBackground">#121916</item>
-        <item name="android:windowSplashScreenBackground">#121916</item>
+        <item name="android:windowBackground">#0F191C</item>
+        <item name="android:windowSplashScreenBackground">#0F191C</item>
         <item name="android:windowSplashScreenAnimatedIcon">@drawable/launcher_spade</item>
     </style>
 </resources>

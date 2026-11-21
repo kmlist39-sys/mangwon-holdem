@@ -1,214 +1,403 @@
 package kr.mangwon.holdem;
 
 import android.animation.ValueAnimator;
-import android.graphics.*;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.LinearGradient;
+import android.graphics.Matrix;
+import android.graphics.Paint;
+import android.graphics.Path;
+import android.graphics.RadialGradient;
+import android.graphics.Rect;
+import android.graphics.RectF;
+import android.graphics.Shader;
 
-/** Painted pub entrance and its fixed, touchable venue directory. */
+/** The three painted club entrances share a common brass rail and a single touch coordinate system. */
 final class PubMenu {
-    static final int[][] FEES={{50000,100000},{100000,150000,200000}};
-    private static final String[] STAKES={"5만 – 10만 P","10만 – 20만 P","20만 – 70만 P"};
-    private static final String[] FORMAT={"데일리 토너먼트  ·  2테이블  ·  18명","데일리 토너먼트  ·  4테이블  ·  36명","원보드 / 더블보드  ·  6인 또는 9인"};
-    private static final String[] VENUE_KEYS={"venue0","venue1","venue2"};
-    private static final int CREAM=0xfff6e4b9, BRASS=0xffd7b478, SUBTLE=0xffd3ccba;
-    private static final float[] DROPS_X={863,879,1001,1051,1403,1443,1462};
-    private static final int[] DROPS_Y={31,50,24,35,138,129,140};
-    private static final int[] FALL={31,28,40,49,49,58,42};
-    private static final int[] PERIOD={3300,4400,4900,4200,5800,3900,5300};
+    static final int[][] FEES = {{50000, 100000}, {100000, 150000, 200000}};
+    private static final String[] NAMES = {"망원동", "성산동", "당산"};
+    private static final String[] KEYS = {"venue0", "venue1", "venue2"};
+    private static final String[] MOTTO = Arena.LOBBY_SLOGAN.split(" ");
+    private static final String[] FORMATS = {
+        "데일리 토너먼트  ·  2테이블 18명",
+        "데일리 토너먼트  ·  4테이블 36명",
+        "원보드 / 더블보드  ·  6인 또는 9인"
+    };
+    private static final String[] STAKES = {"5만 – 10만 P", "10만 – 20만 P", "20만 – 70만 P"};
+    private static final int[] INKS = {0x071713, 0x1e0e13, 0x071a29};
+    private static final int[] HIGHLIGHTS = {0xfff8d69b, 0xffe6b6a0, 0xffb6dced};
+    private static final int IVORY = 0xffffedcc, BRASS = 0xffd7bc88;
+    private static final Shader.TileMode CLAMP = Shader.TileMode.CLAMP;
+    private static final Rect CREST_SOURCE = new Rect(106,96,325,335);
+    private static final Paint.Align LEFT = Paint.Align.LEFT, RIGHT = Paint.Align.RIGHT;
 
     private final Arena a;
-    private final Bitmap doors;
-    private final PortraitMotion[] cast;
-    private final Rect[] photo={new Rect(),new Rect(),new Rect()};
-    private final RectF dst=new RectF();
-    private final BitmapShader scene;
-    private final Matrix map=new Matrix();
-    private final RadialGradient warmth=new RadialGradient(0,0,1,0xc1ffce7c,0x00ffac56,Shader.TileMode.CLAMP);
-    private LinearGradient woodShade,topShade,bleedShade;
-    private final LinearGradient rowShade=new LinearGradient(121,0,440,0,0xeb14251e,0xf120241e,Shader.TileMode.CLAMP);
-    private final LinearGradient titleFoil=new LinearGradient(0,53,0,102,0xfffff1cc,0xffddb77b,Shader.TileMode.CLAMP);
-    private final Arena.Hit[] venueHits=new Arena.Hit[3];
-    private final float[] pressed=new float[3];
-    private int layoutWidth,layoutHeight,previousWallet=-1,previousHand=-1,previousBuy,previousPub,previousFormat;
-    private String walletText="",resumeText="";
-    private float sceneScale,sceneLeft,sceneTop;
-    private long lastFrame,elapsed,settingChecked;
-    private boolean allowMotion=true;
+    private final Portrait[] portraits = new Portrait[3];
+    private final float[] presses = new float[3];
+    private final float[] nameWidths = new float[3];
+    private final float[] mottoWidths = new float[MOTTO.length];
+    private final float[][] glyphWidths = new float[3][];
+    private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+    private final Paint letters = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.SUBPIXEL_TEXT_FLAG);
+    private final Bitmap crest;
+    private final RectF bounds = new RectF();
+    private final Rect chipSource = new Rect();
+    private final Path arrow = new Path();
+    private final LinearGradient[] veils = new LinearGradient[3];
+    private final LinearGradient foil = new LinearGradient(-45,0,45,0,
+        new int[]{0xfff2d8a9,0xfff5dfb8,0xfffffff1,0xfff5dfb8,0xfff2d8a9},
+        new float[]{0,.32f,.5f,.68f,1},CLAMP);
+    private final RadialGradient lamplight = new RadialGradient(0,0,1,0xfff5bd68,0x00efaf52,CLAMP);
+    private final Matrix foilPosition = new Matrix();
+    private LinearGradient headerShade;
+    private float left, right, top, bottom, span;
+    private int width, height, lastWallet = -1, lastHand = -1, lastBuy = -1, lastMode = -1;
+    private String wallet = "", liveFormat = "", liveBuy = "";
+    private long clock, lastFrame, lastMotionCheck, entered;
+    private boolean motion = true, firstFrame = true, moving;
 
-    PubMenu(Arena arena){
-        a=arena;doors=a.image("venue-doors.jpg");
-        scene=a.pub==null?null:new BitmapShader(a.pub,Shader.TileMode.CLAMP,Shader.TileMode.CLAMP);
-        cast=a.pub==null?new PortraitMotion[0]:new PortraitMotion[]{
-            new PortraitMotion(a.pub,485,196,347,330,-1.3f,2.9f,5100),
-            new PortraitMotion(a.pub,820,123,260,280,1.4f,2.6f,4560),
-            new PortraitMotion(a.pub,1183,376,218,174,-2.4f,1.5f,5340),
-            new PortraitMotion(a.pub,1482,231,245,290,.8f,2.1f,6100)
-        };
-        for(int i=0;i<3;i++){
-            if(doors!=null){
-                int width=doors.getWidth()/3;
-                photo[i].set(i*width+2,3,(i+1)*width-2,doors.getHeight()-3);
+    PubMenu(Arena arena) {
+        a = arena;
+        Bitmap atlas = a.image("lobby-venues.webp");
+        if (atlas == null) atlas = a.image("venue-doors.jpg");
+        for (int i = 0; i < portraits.length; i++) {
+            if (atlas != null) {
+                int x = i * atlas.getWidth()/3;
+                Bitmap art = Bitmap.createBitmap(atlas,x,0,(i+1)*atlas.getWidth()/3-x,atlas.getHeight());
+                portraits[i] = new Portrait(art,i);
             }
-            float y=rowTop(i);
-            venueHits[i]=new Arena.Hit(38,y-2,452,y+84,VENUE_KEYS[i]);
-        }
-    }
-    private static float rowTop(int i){return 140+96*i;}
-    private void resize(int w,int h){
-        if(w==layoutWidth&&h==layoutHeight)return;
-        layoutWidth=w;layoutHeight=h;
-        float unit=a.scale;
-        // Preserve the cast on wider foldable screens. Vertical overscan falls into the frame shadow.
-        sceneScale=Math.min(w/1774f,Math.max(h/887f,w/1774f*.97f));
-        sceneLeft=(w-1774*sceneScale)*.50f+unit*46;
-        sceneTop=(h-887*sceneScale)*.5f;
-        if(scene!=null){
-            map.setScale(sceneScale*1774/a.pub.getWidth(),sceneScale*887/a.pub.getHeight());
-            map.postTranslate(sceneLeft,sceneTop);scene.setLocalMatrix(map);
-        }
-        float x=a.offX,y=a.offY;
-        woodShade=new LinearGradient(x,0,x+595*unit,0,
-            new int[]{0xf0171715,0xd51b1915,0x801a1814,0x001a1814},new float[]{0,.5f,.76f,1},Shader.TileMode.CLAMP);
-        topShade=new LinearGradient(0,0,0,Math.max(1,y+71*unit),0x8c100e11,0x00100e11,Shader.TileMode.CLAMP);
-        if(sceneTop>1){
-            float edge=Math.min(.35f,sceneTop/h);
-            bleedShade=new LinearGradient(0,0,0,h,new int[]{0xff161713,0xf0171714,0x00171714,0x00171714,0xf0171714,0xff161713},
-                new float[]{0,edge*.75f,edge+.035f,.965f-edge,1-edge*.75f,1},Shader.TileMode.CLAMP);
-        }else bleedShade=null;
-    }
-    private void shade(Shader shader,float l,float t,float r,float b){
-        a.reset(-1);a.p.setShader(shader);a.c.drawRect(l,t,r,b,a.p);
-    }
-    private void light(float x,float y,float rx,float ry,int alpha){
-        a.c.save();a.c.translate(x,y);a.c.scale(rx,ry);a.reset(-1);a.p.setShader(warmth);a.p.setAlpha(alpha);
-        a.c.drawCircle(0,0,1,a.p);a.c.restore();
-    }
-    void backdrop(int w,int h){
-        backdrop(w,h,true);
-    }
-    void backdrop(int w,int h,boolean animateCast){
-        resize(w,h);
-        if(a.now-settingChecked>1000){allowMotion=ValueAnimator.areAnimatorsEnabled();settingChecked=a.now;}
-        long delta=lastFrame==0?0:Math.min(50,a.now-lastFrame);
-        lastFrame=a.now;
-        boolean moving=animateCast&&allowMotion&&a.host.active&&a.panel.isEmpty();
-        if(moving)elapsed+=delta;
-        if(scene!=null){
-            shade(scene,0,0,w,h);
-            if(moving){
-                a.c.save();a.c.translate(sceneLeft,sceneTop);a.c.scale(sceneScale,sceneScale);
-                details();a.c.restore();
+            glyphWidths[i] = new float[NAMES[i].length()];
+            letters.setTypeface(a.title);
+            letters.setTextSize(40);
+            for (int j = 0; j < NAMES[i].length(); j++) {
+                glyphWidths[i][j] = letters.measureText(NAMES[i],j,j+1);
+                nameWidths[i] += glyphWidths[i][j];
             }
         }
-        if(bleedShade!=null)shade(bleedShade,0,0,w,h);
-        shade(woodShade,0,0,w,h);shade(topShade,0,0,w,h);
-        for(int i=0;i<3;i++){
-            float target=VENUE_KEYS[i].equals(a.held)?1:0;
-            pressed[i]=moving?pressed[i]+(target-pressed[i])*Math.min(1,delta/65f):target;
+        crest = BitmapFactory.decodeResource(a.getResources(),R.drawable.launcher_spade);
+        arrow.moveTo(-3.5f,-5); arrow.lineTo(1.5f,0); arrow.lineTo(-3.5f,5);
+        letters.setTypeface(a.normal);
+        letters.setTextSize(14);
+        for (int i=0;i<MOTTO.length;i++) mottoWidths[i]=letters.measureText(MOTTO[i])+letters.measureText(" ");
+    }
+
+    private void layout(int w, int h) {
+        if (width == w && height == h) return;
+        width = w; height = h;
+        left = -a.offX/a.scale; top = -a.offY/a.scale;
+        right = (w-a.offX)/a.scale; bottom = (h-a.offY)/a.scale;
+        span = (right-left)/3;
+        headerShade = new LinearGradient(0,top,0,top+114,
+            new int[]{0xf7111514,0xec111514,0xc9101514,0x6d101514,0x00101514},
+            new float[]{0,.39f,.53f,.67f,1},CLAMP);
+        for (int i=0; i<3; i++) {
+            int k = INKS[i];
+            veils[i] = new LinearGradient(0,bottom-214,0,bottom,new int[]{
+                k,0x17000000|k,0x85000000|k,0xdb000000|k,0xf6000000|k},
+                new float[]{0,.19f,.48f,.74f,1},CLAMP);
         }
     }
-    private void details(){
-        for(int i=0;i<cast.length;i++)cast[i].draw(a,elapsed+i*1543L);
-        float beat=(float)Math.sin(elapsed*.00074)+.4f*(float)Math.sin(elapsed*.00161);
-        light(1253,45,163,71,(int)(38+beat*13));
-        light(1572,122,40,66,(int)(30+beat*7));
-        for(int i=0;i<DROPS_X.length;i++){
-            float u=((elapsed+511L*i)%PERIOD[i])/1100f;
-            if(u>=1)continue;
-            float x=DROPS_X[i]+u*.8f,y=DROPS_Y[i]+u*u*FALL[i];
-            int alpha=Math.round(98*(float)Math.sin(u*Math.PI));
-            a.line(x,y-6-u*4,x,y,(alpha<<24)|0xb5d5dc,1.55f);
-            a.reset((alpha<<24)|0xe8e6ca);a.c.drawCircle(x,y+.5f,1.06f,a.p);
+
+    void backdrop(int w, int h) { backdrop(w,h,true); }
+
+    void backdrop(int w, int h, boolean animateCast) {
+        layout(w,h);
+        if (firstFrame || a.now-lastMotionCheck>1000) {
+            motion = ValueAnimator.areAnimatorsEnabled();
+            lastMotionCheck = a.now;
         }
-        float shine=(elapsed%9700)/1700f;
-        if(shine<1){
-            int alpha=Math.round(157*(float)Math.sin(shine*Math.PI));
-            float x=948+shine*56;
-            a.line(x-4,587,x+4,587,(alpha<<24)|0xffde9d,1.6f);
+        moving = animateCast && motion && a.host.active && a.panel.isEmpty();
+        if (firstFrame || a.now-lastFrame>1100) entered = clock;
+        long step = firstFrame ? 0 : Math.min(60,Math.max(0,a.now-lastFrame));
+        lastFrame = a.now; firstFrame = false;
+        if (moving) clock += step;
+        Canvas c = a.c;
+        c.save(); c.translate(a.offX,a.offY); c.scale(a.scale,a.scale);
+        for (int i=0; i<3; i++) {
+            boolean pressed = KEYS[i].equals(a.held) || (a.g!=null && liveVenue()==i && "entry".equals(a.held));
+            float target = pressed ? 1f : 0f;
+            presses[i] += (target-presses[i]) * (moving ? Math.min(1,step/58f) : 1);
+            float l = left+span*i, r = i==2 ? right : left+span*(i+1);
+            c.save(); c.clipRect(l,top,r,bottom);
+            if (portraits[i]!=null) drawPainting(i,l,r);
+            else c.drawColor(0xff000000|INKS[i]);
+            if (a.g!=null && i!=liveVenue()) c.drawColor(0x86101417);
+            fill(veils[i],l,top,r,bottom);
+            c.restore();
         }
+        fill(headerShade,left,top,right,top+115);
+        for (int i=1;i<3;i++) {
+            float x=left+i*span;
+            a.line(x-1,top+56,x-1,bottom,0xff201c1b,1.5f);
+            a.line(x,top+56,x,bottom,0xb49c865d,1);
+        }
+        a.line(left,top+56,right,top+56,0x9a77684b,1);
+        c.restore();
     }
-    /** Move the ink and its shading together while pinning every edge to the painted room. */
-    private static final class PortraitMotion {
-        private static final int COLS=8,ROWS=7,VERTICES=(COLS+1)*(ROWS+1);
-        private final float[] origin=new float[2*VERTICES],mesh=new float[2*VERTICES],weight=new float[VERTICES];
-        private final Bitmap patch;
-        private final float dx,dy;private final int period;
-        PortraitMotion(Bitmap art,int l,int t,int w,int h,float dx,float dy,int period){
-            this.dx=dx;this.dy=dy;this.period=period;
-            float sx=art.getWidth()/1774f,sy=art.getHeight()/887f;
-            patch=Bitmap.createBitmap(art,Math.round(l*sx),Math.round(t*sy),Math.round(w*sx),Math.round(h*sy));
-            for(int j=0;j<=ROWS;j++)for(int i=0;i<=COLS;i++){
-                int k=j*(COLS+1)+i;float u=i/(float)COLS,v=j/(float)ROWS;
-                origin[k*2]=l+u*w;origin[k*2+1]=t+v*h;
-                float envelope=(float)(Math.sin(Math.PI*u)*Math.sin(Math.PI*v));
-                weight[k]=envelope*envelope;
+
+    private void drawPainting(int i, float l, float r) {
+        Portrait portrait = portraits[i];
+        Bitmap art = portrait.art;
+        float sw = art.getWidth(), sh = art.getHeight();
+        double phase = clock*(2*Math.PI/(i==1 ? 10900 : i==2 ? 13700 : 12100)) + i*1.7;
+        // Overscan gives the slow camera a few pixels to travel with no exposed edges.
+        float breathe = motion ? (float)Math.sin(phase) : 0;
+        float scale = Math.max((r-l)/sw,(bottom-top)/sh) * (1.025f+.005f*breathe+.018f*presses[i]);
+        float x = (l+r-scale*sw)*.5f+2.4f*breathe;
+        float y = (top+bottom-scale*sh)*.5f;
+        Canvas c = a.c;
+        c.save(); c.translate(x,y); c.scale(scale*sw,scale*sh);
+        solid(Color.WHITE);
+        portrait.draw(c,paint,clock,motion);
+        if (motion) sceneLight(i,phase);
+        c.restore();
+    }
+
+    /** Scene effects are located on the objects in each illustration, in UV coordinates. */
+    private void sceneLight(int i, double phase) {
+        if (i==0) {
+            glow(.528f,.061f,.245f,.091f,(int)(30+14*Math.sin(phase*2.1)));
+        } else if (i==1) {
+            float t=(clock%6900)/1050f;
+            if (t<1) {
+                float u=(float)Math.sin(t*Math.PI);
+                float x=.735f+.16f*t, y=.17f-.030f*t;
+                glow(x,y,.047f,.016f,(int)(110*u));
+                glow(x,y,.005f,.024f,(int)(85*u));
             }
-        }
-        void draw(Arena a,long clock){
-            double phase=(clock%period)*(2*Math.PI/period);
-            float x=dx*(float)Math.sin(phase),y=dy*(float)Math.sin(phase+.95);
-            for(int k=0;k<VERTICES;k++){
-                mesh[k*2]=origin[k*2]+x*weight[k];mesh[k*2+1]=origin[k*2+1]+y*weight[k];
+        } else {
+            for (int j=0;j<5;j++) {
+                double beat=phase*(1.3+j*.09)+1.51*j;
+                float x=.083f+.052f*j+.007f*(float)Math.sin(beat);
+                float y=.282f+.008f*j;
+                glow(x,y,.023f,.0024f,(int)(43+29*Math.sin(beat+.7)));
             }
-            a.reset(-1);a.c.drawBitmapMesh(patch,COLS,ROWS,mesh,0,null,0,a.p);
+            glow(.954f,.076f,.109f,.106f,(int)(16+9*Math.sin(phase*1.3)));
         }
     }
-    void draw(){
-        if(a.panel.equals("entry"))return;
+
+    private void glow(float x, float y, float rx, float ry, int alpha) {
+        Canvas c = a.c;
+        c.save(); c.translate(x,y); c.scale(rx,ry);
+        solid(Color.WHITE); paint.setShader(lamplight); paint.setAlpha(alpha);
+        c.drawCircle(0,0,1,paint); c.restore();
+    }
+
+    private void solid(int color) {
+        paint.setShader(null); paint.setStyle(Paint.Style.FILL); paint.setColor(color);
+    }
+
+    private void fill(Shader shader,float l,float t,float r,float b) {
+        solid(Color.WHITE); paint.setShader(shader); a.c.drawRect(l,t,r,b,paint);
+    }
+
+    private int liveVenue() {
+        return Math.max(0,Math.min(2,a.g==null ? a.venue : a.g.optInt("pub")));
+    }
+
+    float titleX() { return left+61; }
+    float titleY() { return top+38; }
+
+    void draw() {
+        if ("entry".equals(a.panel)) return;
         drawTitle(255);
         controls();
     }
-    void drawTitle(int alpha){
-        a.text("망원동 홀덤",48,102,52,Color.argb(207*alpha/255,33,23,14),a.title,Paint.Align.LEFT);
-        a.reset(-1);a.p.setShader(titleFoil);a.p.setTypeface(a.title);a.p.setTextSize(52);
-        a.p.setAlpha(alpha);
-        a.c.drawText("망원동 홀덤",47,100,a.p);
-    }
-    void controls(){
-        a.musicButton(698,24);
-        int wallet=a.snapshot.optInt("wallet",50000);
-        if(wallet!=previousWallet){walletText=a.fmt(wallet)+" P   +";previousWallet=wallet;}
-        a.brass(walletText,793,25,157,"shop");a.brass("설정",962,25,78,"settings");
-        if(a.g!=null){resume();return;}
-        for(int i=0;i<3;i++)venue(i);
-    }
-    private void door(int i,float x,float y,float size,int alpha){
-        if(doors==null)return;
-        dst.set(x,y,x+size,y+size);a.reset(-1);a.p.setAlpha(alpha);a.c.drawBitmap(doors,photo[i],dst,a.p);
-    }
-    private void venue(int i){
-        float y=rowTop(i),press=pressed[i],x=40,edge=448;
-        a.c.save();a.c.translate(0,press*1.7f);
-        a.box(x,y+3,edge,y+82,3,0x7c0e0e0b);
-        a.box(x,y,edge,y+79,2,0xff24211a);
-        shade(rowShade,x+77,y+1,edge-1,y+78);
-        door(i,x+2,y+2,75,255);
-        a.line(x+78,y+1,x+78,y+78,0xff786345,1);
-        a.stroke(x+.5f,y+.5f,edge-.5f,y+78.5f,2,0xff786748,1);
-        if(press>.01f)a.box(x+1,y+1,edge-1,y+78,1,((int)(44*press)<<24)|0xe3bf75);
-        a.text(a.pubs[i],131,y+33,23,CREAM,a.bold,Paint.Align.LEFT);
-        a.text(STAKES[i],431,y+32,16,BRASS,a.nums,Paint.Align.RIGHT);
-        a.text(FORMAT[i],132,y+60,15,SUBTLE,a.normal,Paint.Align.LEFT);
-        a.c.restore();a.hits.add(venueHits[i]);
-    }
-    private void resume(){
-        int pub=a.g.optInt("pub"),buy=a.g.optInt("buyin"),hand=a.g.optInt("hand");
-        int mode=a.g.optBoolean("cash")?(a.g.optBoolean("double")?2:1):0;
-        if(hand!=previousHand||pub!=previousPub||buy!=previousBuy||mode!=previousFormat){
-            String format=mode==2?"더블보드":mode==1?"원보드":"데일리 토너먼트";
-            resumeText=format+"  ·  "+a.shortP(buy)+"P  ·  "+hand+"번째 핸드";
-            previousHand=hand;previousPub=pub;previousBuy=buy;previousFormat=mode;
+
+    void drawTitle(int alpha) {
+        float x=titleX(), y=titleY();
+        if (crest!=null) {
+            bounds.set(x-38,y-30,x-8,y+3);
+            solid(Color.WHITE); paint.setAlpha(alpha); a.c.drawBitmap(crest,CREST_SOURCE,bounds,paint);
         }
-        a.txt("진행 중인 게임",51,170,16,BRASS);
-        a.box(42,192,446,287,2,0xec17251f);
-        door(pub,45,195,89,255);
-        a.stroke(42,192,446,287,2,0xff796847,1);
-        a.text(a.pubs[pub],148,232,26,CREAM,a.bold,Paint.Align.LEFT);
-        a.txt(resumeText,148,262,15,SUBTLE);
-        a.key("내 자리로 돌아가기",50,313,250,53,"entry",0);
+        a.text("망원동 홀덤",x,y,29,(alpha<<24)|0xf4e4bf,a.title,LEFT);
+        a.hit(left+12,top+1,x+145,top+54,"replayIntro");
+
+        float wordX=x+161;
+        a.line(wordX-13,y-15,wordX-13,y+1,((alpha*95/255)<<24)|0xc7ab80,1);
+        for (int i=0;i<MOTTO.length;i++) {
+            float t=moving ? Math.max(0,Math.min(1,(clock-entered+130-55*i)/420f)) : 1;
+            float rest=(1-t)*(1-t);
+            a.text(MOTTO[i],wordX,y-3+rest*5,14,
+                ((int)(alpha*(.43f+.57f*t))<<24)|0xd3c7ad,a.normal,LEFT);
+            wordX+=mottoWidths[i];
+        }
     }
-    void schedule(){
-        if(allowMotion&&!a.held.isEmpty())a.postInvalidateOnAnimation();
-        else if(allowMotion)a.postInvalidateDelayed(33);
-        else if(a.now<a.toastEnd)a.postInvalidateDelayed(a.toastEnd-a.now);
+
+    void controls() {
+        headerButtons();
+        if (a.g!=null) sessionText();
+        for (int i=0;i<3;i++) venue(i);
+    }
+
+    private void headerButtons() {
+        float y=top+29, settings=right-28, divider=right-102, walletRight=right-121;
+        int funds=a.snapshot.optInt("wallet",50000);
+        if (funds!=lastWallet) { wallet=a.fmt(funds)+" P"; lastWallet=funds; }
+        letters.setTextSize(19); letters.setTypeface(a.nums);
+        float walletWidth=letters.measureText(wallet);
+        float walletLeft=walletRight-33-walletWidth-27;
+        boolean music=a.host.musicEnabled;
+        int muted=music ? 0xffe0d9c3 : 0xffaba99d;
+        float soundX=walletLeft-104;
+        paint.setStrokeCap(Paint.Cap.ROUND);
+        a.line(soundX+8,y+4,soundX+8,y-8,muted,1.8f);
+        a.line(soundX+8,y-8,soundX+14,y-6,muted,2);
+        solid(muted); a.c.drawOval(soundX+1,y+1,soundX+9,y+7,paint);
+        if (!music) a.line(soundX,y-8,soundX+16,y+7,muted,1.6f);
+        a.text(music?"음악 켬":"음악 끔",soundX+22,y+5,14,muted,a.normal,LEFT);
+        a.hit(soundX-7,top+3,walletLeft-15,top+54,"music");
+        a.line(walletLeft-9,y-9,walletLeft-9,y+9,0x977b6e55,1);
+        Bitmap chips=a.chipArt;
+        if (chips!=null) {
+            chipSource.set(0,0,chips.getWidth()/2,chips.getHeight()/2);
+            bounds.set(walletLeft-1,y-13,walletLeft+25,y+13);
+            solid(Color.WHITE); a.c.drawBitmap(chips,chipSource,bounds,paint);
+        }
+        a.text(wallet,walletRight-29,y+6.5f,19,IVORY,a.nums,RIGHT);
+        solid(0xffc8a56d); a.c.drawCircle(walletRight-11,y,9.5f,paint);
+        a.line(walletRight-15,y,walletRight-7,y,0xff29251f,1.7f);
+        a.line(walletRight-11,y-4,walletRight-11,y+4,0xff29251f,1.7f);
+        a.hit(walletLeft-5,top+3,walletRight+5,top+54,"shop");
+        a.line(divider,y-9,divider,y+9,0x977b6e55,1);
+        drawGear(settings-39,y);
+        a.text("설정",settings,y+5,15,IVORY,a.bold,RIGHT);
+        a.hit(divider+5,top+3,right-6,top+54,"settings");
+    }
+
+    private void drawGear(float x,float y) {
+        solid(0xffdaccad); paint.setStyle(Paint.Style.STROKE); paint.setStrokeWidth(1.6f);
+        a.c.drawCircle(x,y,5.3f,paint);
+        for (int i=0;i<8;i++) {
+            a.c.save(); a.c.rotate(i*45,x,y);
+            a.c.drawLine(x,y-5.2f,x,y-7.5f,paint); a.c.restore();
+        }
+        solid(0xffdaccad); a.c.drawCircle(x,y,1.7f,paint);
+    }
+
+    private void sessionText() {
+        int hand=a.g.optInt("hand"), buy=a.g.optInt("buyin");
+        int mode=a.g.optBoolean("cash") ? (a.g.optBoolean("double") ? 2 : 1) : 0;
+        if (lastHand==hand && lastBuy==buy && lastMode==mode) return;
+        String format=mode==2 ? "더블보드" : mode==1 ? "원보드" : "데일리 토너먼트";
+        liveFormat=format+"  ·  "+hand+"번째 핸드";
+        liveBuy=a.shortP(buy)+" P";
+        lastHand=hand; lastBuy=buy; lastMode=mode;
+    }
+
+    private void venue(int i) {
+        boolean session=a.g!=null, selected=i==liveVenue(), playable=!session||selected;
+        float l=left+i*span, r=l+span, x=l+23;
+        int info=playable ? 0xffe2dece : 0xffa9adab;
+        float lift=presses[i]*2.6f;
+        a.text(session&&selected?liveFormat:FORMATS[i],x,bottom-108-lift,16,info,a.bold,LEFT);
+        sign(i,x,bottom-62-lift,playable);
+        a.line(x,bottom-49,r-22,bottom-49,playable?0x775f695c:0x555f695c,1);
+        a.text("바이인",x,bottom-21,14,info,a.normal,LEFT);
+        a.text(session&&selected?liveBuy:STAKES[i],x+49,bottom-20,19,
+            playable ? IVORY : info,a.nums,LEFT);
+        if (playable) {
+            String cta=session ? "내 자리로 돌아가기" : "입장";
+            float targetRight=r-19, targetLeft=targetRight-(session ? 142 : 72);
+            if (selected) {
+                a.stage.plate(targetLeft,bottom-44+presses[i],targetRight,bottom-7+presses[i],1);
+                a.text(cta,(targetLeft+targetRight)*.5f-4,bottom-19+presses[i],
+                    session?13:15,0xff272317,a.bold,Paint.Align.CENTER);
+                chevron(targetRight-15,bottom-25+presses[i],0xff44341e);
+            } else {
+                a.text(cta,targetRight-21,bottom-20,15,HIGHLIGHTS[i],a.bold,RIGHT);
+                chevron(targetRight-7,bottom-25,HIGHLIGHTS[i]);
+            }
+            a.hit(l,top+58,r,bottom,session?"entry":KEYS[i]);
+        }
+        a.line(l+1,top+57,r-1,top+57,selected?0xffebc88d:0x3caaa082,selected?2:1);
+    }
+
+    private void chevron(float x,float y,int color) {
+        a.c.save(); a.c.translate(x,y);
+        solid(color); paint.setStyle(Paint.Style.STROKE); paint.setStrokeWidth(1.8f);
+        paint.setStrokeJoin(Paint.Join.ROUND); a.c.drawPath(arrow,paint); a.c.restore();
+    }
+
+    private void sign(int i,float x,float y,boolean playable) {
+        String name=NAMES[i];
+        long age=clock-entered;
+        boolean animated=moving && playable;
+        float sweep=((clock+7500-i*1700)%9300)/1250f;
+        boolean glint=animated && sweep<1;
+        letters.setTypeface(a.title); letters.setTextSize(40); letters.setTextAlign(LEFT);
+        if (glint) {
+            foilPosition.setTranslate(x-64+sweep*(nameWidths[i]+127),0);
+            foil.setLocalMatrix(foilPosition);
+        }
+        float start=x;
+        for (int j=0;j<name.length();j++) {
+            float arrival=animated ? Math.max(0,Math.min(1,(age+155-i*64-j*64)/470f)) : 1;
+            float remain=(1-arrival)*(1-arrival);
+            float pulse=animated?(float)Math.sin(clock*.00148+i*1.37-j*.57)*.63f:0;
+            float glyphY=y+remain*12+pulse-presses[i]*(1.7f+(j%2)*1.4f);
+            a.c.save(); a.c.rotate(remain*(-5.8f+j*1.1f)+pulse*.4f,x+glyphWidths[i][j]*.5f,glyphY);
+            letters.setShader(null); letters.setColor(0xab100e0b);
+            a.c.drawText(name,j,j+1,x+.7f,glyphY+1.6f,letters);
+            letters.setColor(playable?0xfff4dfb7:0xffb0b3aa); letters.setShader(glint?foil:null);
+            a.c.drawText(name,j,j+1,x,glyphY,letters);
+            a.c.restore();
+            x+=glyphWidths[i][j];
+        }
+        letters.setShader(null);
+        a.text("홀덤펍",start+nameWidths[i]+10,y-1,20,
+            playable?HIGHLIGHTS[i]:0xffa9ada7,a.title,LEFT);
+    }
+
+    void schedule() {
+        if (!motion) {
+            if (a.now<a.toastEnd) a.postInvalidateDelayed(a.toastEnd-a.now);
+        } else if (!a.held.isEmpty() || clock-entered<950) a.postInvalidateOnAnimation();
+        else a.postInvalidateDelayed(33);
+    }
+
+    /** A low-resolution deformation grid gently separates the portrait, foreground hand and room. */
+    private static final class Portrait {
+        private static final int COLS=17, ROWS=21, COUNT=(COLS+1)*(ROWS+1);
+        final Bitmap art;
+        private final int index;
+        private final float[] rest=new float[COUNT*2], mesh=new float[COUNT*2];
+        private final float[] head=new float[COUNT], body=new float[COUNT], hand=new float[COUNT];
+
+        Portrait(Bitmap bitmap,int scene) {
+            art=bitmap; index=scene;
+            float hx=scene==0?.55f:scene==1?.48f:.65f, hy=scene==0?.275f:.25f;
+            float fx=scene==0?.39f:scene==1?.44f:.57f, fy=scene==1?.37f:.82f;
+            for (int j=0;j<=ROWS;j++) for (int i=0;i<=COLS;i++) {
+                int k=j*(COLS+1)+i; float u=i/(float)COLS,v=j/(float)ROWS;
+                rest[k*2]=u; rest[k*2+1]=v;
+                float edge=Math.min(1,Math.min(Math.min(u,1-u),Math.min(v,1-v))*10);
+                head[k]=edge*falloff(u,v,hx,hy,.29f,.25f);
+                body[k]=edge*falloff(u,v,.52f,.55f,.53f,.37f);
+                hand[k]=edge*falloff(u,v,fx,fy,.20f,.14f);
+            }
+        }
+
+        private static float falloff(float x,float y,float cx,float cy,float rx,float ry) {
+            float dx=(x-cx)/rx, dy=(y-cy)/ry;
+            float v=Math.max(0,1-dx*dx-dy*dy); return v*v*(3-2*v);
+        }
+
+        void draw(Canvas c,Paint p,long clock,boolean motion) {
+            if (!motion) {
+                c.drawBitmapMesh(art,COLS,ROWS,rest,0,null,0,p);
+                return;
+            }
+            double phase=clock*(2*Math.PI/(index==0?4960:index==1?5780:5250))+index*1.7;
+            float breath=(float)Math.sin(phase), sway=(float)Math.sin(phase*.67+.55);
+            float finger=(float)Math.sin(phase*1.13-.35);
+            for (int k=0;k<COUNT;k++) {
+                mesh[k*2]=rest[k*2]+head[k]*.0043f*sway+body[k]*.0017f*sway+hand[k]*.0027f*finger;
+                mesh[k*2+1]=rest[k*2+1]+head[k]*.0034f*breath+body[k]*.0028f*breath-hand[k]*.0011f*breath;
+            }
+            c.drawBitmapMesh(art,COLS,ROWS,mesh,0,null,0,p);
+        }
     }
 }

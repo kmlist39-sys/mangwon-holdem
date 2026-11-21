@@ -308,6 +308,74 @@ function simulatedScore(h,board){
  const ab=pairScore(h[0],h[1],board);
  return h.length===2?ab:Math.max(ab,pairScore(h[0],h[2],board),pairScore(h[1],h[2],board));
 }
+
+// Fraction of a board shared by each live hand, before side pots, chips or rake.
+// Only call this with the public snapshot. Never condition a runout on mucked cards.
+let lastPublicEquityKey='',lastPublicEquity=null;
+function showdownEquity(view){
+ if(view.showdownTitle||view.pocketTurnMs>=0||view.boardHold>0||view.phase==='suspense')return null;
+ if(!view.allInRunout&&view.phase!=='showdown'&&view.phase!=='done')return null;
+ const live=view.p.filter(p=>!p.fold),size=view.double?3:2;
+ if(live.length<2||live.some(p=>p.hole.length!==size))return null;
+ const boards=view.board;
+ const key=JSON.stringify([view.sessionId,view.hand,live.map(p=>[p.id,p.hole]),boards]);
+ if(key===lastPublicEquityKey)return lastPublicEquity;
+ const known=new Set(boards.flat());
+ for(const p of live)for(const card of p.hole)known.add(card);
+ const unseen=Array.from({length:52},(_,i)=>i).filter(c=>!known.has(c));
+ const seats={};
+ for(const p of live)seats[p.id]=[];
+ for(const board of boards){
+   const shares=boardEquity(live,board,unseen);
+   for(let i=0;i<live.length;i++)seats[live[i].id].push(shares[i]);
+ }
+ lastPublicEquityKey=key;
+ lastPublicEquity={seats,approximate:boards.some(b=>b.length<3)};
+ return lastPublicEquity;
+}
+
+function boardEquity(live,board,unseen){
+ const split=live.map(()=>0),scores=live.map(()=>0),runout=board.slice();
+ const need=5-board.length;
+ let trials=0;
+ function settleBoard(){
+   const mask=boardMasks(runout);
+   let high=-1,tied=0;
+   for(let i=0;i<live.length;i++){
+     const score=simulatedScore(live[i].hole,mask);scores[i]=score;
+     if(score>high){high=score;tied=1}
+     else if(score===high)tied++;
+   }
+   for(let i=0;i<scores.length;i++)if(scores[i]===high)split[i]+=1/tied;
+   trials++;
+ }
+ // The other board's future cards can be marginalized: every legal completion
+ // of this board allows the same number of completions of its partner board.
+ if(!need)settleBoard();
+ else if(need===1){
+   for(const c of unseen){runout[4]=c;settleBoard()}
+ }else if(need===2){
+   for(let i=0;i<unseen.length;i++){
+     runout[3]=unseen[i];
+     for(let j=i+1;j<unseen.length;j++){runout[4]=unseen[j];settleBoard()}
+   }
+ }else{
+   // Independent PRNG: displaying an estimate cannot change the game or AI RNG.
+   // Sorted unseen cards and this local seed reproduce the same sample on reload.
+   let seed=0x6d2b79f5;
+   const pool=unseen.slice();
+   for(let sample=0;sample<2048;sample++){
+     for(let i=0;i<need;i++){
+       seed^=seed<<13;seed^=seed>>>17;seed^=seed<<5;
+       const j=i+Math.floor((seed>>>0)/4294967296*(pool.length-i));
+       const pick=pool[j];pool[j]=pool[i];pool[i]=pick;
+       runout[board.length+i]=pick;
+     }
+     settleBoard();
+   }
+ }
+ return split.map(share=>100*share/trials);
+}
 function pairOpening(a,b){
  const one=a%13+2,two=b%13+2,hi=Math.max(one,two),lo=Math.min(one,two);
  if(hi===lo)return Math.min(1,.48+(hi-2)*.044);
@@ -1010,7 +1078,10 @@ function step(dt,inspecting,holdTable){if(!g)return;
 function snapshot(){let v={wallet:state.wallet,opt:state.opt,last:state.last,lastExit:state.lastExit||null,notice,spoken,g:null};if(!g)return v;for(const table of g.ts)accountFinished(table);let t=g.ts[0],hero=t.ps.find(p=>p.id===-1),own=t.phase==='bet'&&!t.boardHold&&t.ps[t.actor]?.id===-1;
  updateBlindNotices();
  const boundary=afterHand(t);
- v.g={nextBlinds:t.nextBlinds||null,canPreFold:!!canReserveFold(t,hero),preFold:!!(t.preFoldHand===t.hand&&foldReservationLive(t,hero)),autoNextLeft:boundary?autoNextRemaining(t):null,afterHand:boundary,wagers:t.wagers||[],lastClosed:g.lastClosed||null,exitQuote:exitQuote(),sessionId:g.exitId,settlement:t.phase==='done'?t.settlement||null:null,cashStats:g.cash?cashStats(t,hero):null,tournament:g.cash?null:tournamentStats(t,hero),leaders:tournamentLeaders(g),lastTransfer:g.lastTransfer||null,quick:own?quickBets(t,hero):null,announcement:t.announcement?.hand===t.hand?t.announcement:null,beforeStreet:t.beforeStreet||0,boardHold:t.boardHold||0,entrants:g.entrants,capacity:g.capacity,tables:g.ts.map(tableInfo),entries:g.cash?0:Math.round(g.pool/g.buyin),rebuyCount:g.cash?0:Math.round(g.pool/g.buyin)-g.entrants,payouts:g.cash?[]:[.5,.3,.2].map(v=>Math.round(g.pool*v)),lastHero:t.lastHero?.hand===t.hand?t.lastHero:null,buyin:g.buyin,pub:g.pub,cash:g.cash,double:g.double,hand:g.count,level:t.level,sb:t.sb,bb:t.bb,pool:g.pool,break:g.stage==='break',breakLeft:g.breakLeft,elapsed:g.elapsed,bank:g.bank,rebuy:g.rebuyAsk,left:g.cash?t.ps.length:g.entrants-g.exits.length,ready:t.phase==='done',phase:visiblePhase(t),pocketTurnMs:t.pocketTurnLeft>0?Math.round(1000*(POCKET_TURN_SECONDS-t.pocketTurnLeft)):-1,showdownTitle:hasShowdownTitle(t),showdownTitleMs:hasShowdownTitle(t)?Math.round(1000*(SHOWDOWN_TITLE_SECONDS-t.titleLeft)):0,allInRunout:!!t.allInRunout,street:t.stage,btn:t.btn,actor:t.actor,sbs:t.sbSeat,bbs:t.bbSeat,timer:g.timer,board:t.boards,feed:t.feed,summary:t.summary,pot:t.ps.reduce((s,q)=>s+q.paid,0),reveal:g.revealed,show:t.reveal,own,call:Math.min(hero.stack,owing(t,hero)),min:Math.min(hero.stack+hero.bet,t.price+t.raise),max:hero.stack+hero.bet,raise:own&&canRaise(t,hero),other:g.ts[1]?.feed||'',ranks:g.revealed&&!t.boardHold?t.boards.filter(b=>b.length).map(b=>label(best(hero.hole,b))):[],p:t.ps.map((p,i)=>({id:p.id,...publicSkill(p),name:nameOf(p.id),rebuys:rebuyCountOf(p),buyin:p.buyin??g.buyin,banked:p.banked||0,move:p.move||null,stack:t.phase==='showdown'&&t.preAward?t.preAward[i]:p.stack,bet:p.bet,fold:p.fold,action:p.action,won:t.phase==='done'?(t.wins[p.id]||0):0,spot:t.phase==='showdown'&&t.lines[t.reveal-1]?.id===p.id,hole:visiblePocket(t,p)})),boardWins:t.double&&t.phase==='done'&&t.lines?.length?t.byBoard.map(w=>Object.keys(w).map(k=>nameOf(+k)).join('·')):[]};return v}
+ v.g={nextBlinds:t.nextBlinds||null,canPreFold:!!canReserveFold(t,hero),preFold:!!(t.preFoldHand===t.hand&&foldReservationLive(t,hero)),autoNextLeft:boundary?autoNextRemaining(t):null,afterHand:boundary,wagers:t.wagers||[],lastClosed:g.lastClosed||null,exitQuote:exitQuote(),sessionId:g.exitId,settlement:t.phase==='done'?t.settlement||null:null,cashStats:g.cash?cashStats(t,hero):null,tournament:g.cash?null:tournamentStats(t,hero),leaders:tournamentLeaders(g),lastTransfer:g.lastTransfer||null,quick:own?quickBets(t,hero):null,announcement:t.announcement?.hand===t.hand?t.announcement:null,beforeStreet:t.beforeStreet||0,boardHold:t.boardHold||0,entrants:g.entrants,capacity:g.capacity,tables:g.ts.map(tableInfo),entries:g.cash?0:Math.round(g.pool/g.buyin),rebuyCount:g.cash?0:Math.round(g.pool/g.buyin)-g.entrants,payouts:g.cash?[]:[.5,.3,.2].map(v=>Math.round(g.pool*v)),lastHero:t.lastHero?.hand===t.hand?t.lastHero:null,buyin:g.buyin,pub:g.pub,cash:g.cash,double:g.double,hand:g.count,level:t.level,sb:t.sb,bb:t.bb,pool:g.pool,break:g.stage==='break',breakLeft:g.breakLeft,elapsed:g.elapsed,bank:g.bank,rebuy:g.rebuyAsk,left:g.cash?t.ps.length:g.entrants-g.exits.length,ready:t.phase==='done',phase:visiblePhase(t),pocketTurnMs:t.pocketTurnLeft>0?Math.round(1000*(POCKET_TURN_SECONDS-t.pocketTurnLeft)):-1,showdownTitle:hasShowdownTitle(t),showdownTitleMs:hasShowdownTitle(t)?Math.round(1000*(SHOWDOWN_TITLE_SECONDS-t.titleLeft)):0,allInRunout:!!t.allInRunout,street:t.stage,btn:t.btn,actor:t.actor,sbs:t.sbSeat,bbs:t.bbSeat,timer:g.timer,board:t.boards,feed:t.feed,summary:t.summary,pot:t.ps.reduce((s,q)=>s+q.paid,0),reveal:g.revealed,show:t.reveal,own,call:Math.min(hero.stack,owing(t,hero)),min:Math.min(hero.stack+hero.bet,t.price+t.raise),max:hero.stack+hero.bet,raise:own&&canRaise(t,hero),other:g.ts[1]?.feed||'',ranks:g.revealed&&!t.boardHold?t.boards.filter(b=>b.length).map(b=>label(best(hero.hole,b))):[],p:t.ps.map((p,i)=>({id:p.id,...publicSkill(p),name:nameOf(p.id),rebuys:rebuyCountOf(p),buyin:p.buyin??g.buyin,banked:p.banked||0,move:p.move||null,stack:t.phase==='showdown'&&t.preAward?t.preAward[i]:p.stack,bet:p.bet,fold:p.fold,action:p.action,won:t.phase==='done'?(t.wins[p.id]||0):0,spot:t.phase==='showdown'&&t.lines[t.reveal-1]?.id===p.id,hole:visiblePocket(t,p)})),boardWins:t.double&&t.phase==='done'&&t.lines?.length?t.byBoard.map(w=>Object.keys(w).map(k=>nameOf(+k)).join('·')):[]};
+ v.g.equity=showdownEquity(v.g);
+ return v;
+}
 // The native layer supplies its durable, cumulative count of SDK-earned rewards.
 // The wallet and its applied count are serialized in the same session record.
 function applyRewardedAds(completed){
