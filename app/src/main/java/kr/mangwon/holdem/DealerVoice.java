@@ -34,6 +34,9 @@ final class DealerVoice {
     boolean ready(){return bank.ready();}
     boolean busy(){return playing!=null||prefetched!=null||!pending.isEmpty()||!recorded.isEmpty();}
     String status(){return bank.status();}
+    void lastRebuyLevel(){
+        if(activity.active&&ready()&&add(new DealerLine("이번 블라인드가 마지막 리바인 기회입니다.","rebuy-level")))playNext();
+    }
     void preview(){
         if(!ready()){activity.arena.note(status());return;}
         stop();previewing=true;
@@ -68,6 +71,7 @@ final class DealerVoice {
         if(!enabled&&!previewing)stop();
         if(observed&&enabled&&ready()){
             if(snapshot.optBoolean("finalTableStarted"))add(new DealerLine("파이널 테이블입니다.","final-table"));
+            if(snapshot.optBoolean("headsUpStarted"))add(new DealerLine("해즈업!!!","heads-up"));
             if(action!=null&&action.optInt("hand",hand)==hand&&(seenHand!=hand||seq!=seenAction)){
                 String kind=action.optString("kind");add(new DealerLine(OutcomeAnnouncement.action(kind),"full".equals(kind)?"pot":kind));
             }

@@ -15,6 +15,7 @@ public final class Arena extends View {
  final SettlementMotion payouts=new SettlementMotion(this);
  final FoldMotion folds=new FoldMotion(this);
  final LobbyIntro intro=new LobbyIntro(this);
+ final TournamentPodium podium=new TournamentPodium(this);
  final BlindTicker blindTicker=new BlindTicker(this);
  private long pocketTurnSampleAt;
  final WagerDisplay wages=new WagerDisplay(this);final NameplateClock nameClock=new NameplateClock(this);
@@ -35,7 +36,7 @@ public final class Arena extends View {
  private final LinearGradient hudTop=new LinearGradient(0,0,0,72,0xfc111c17,0x07111c17,Shader.TileMode.CLAMP);
  private final LinearGradient hudBottom=new LinearGradient(0,409,0,520,0x00101814,0xfa101813,Shader.TileMode.CLAMP);
  final SeatActing acting;
- final FinalTableBanner finalTable;
+ final TournamentBanner tournamentBanner;
  private final ArrayList<Hit> hitPool=new ArrayList<>();
  private final android.util.LongSparseArray<String> numbers=new android.util.LongSparseArray<>();
  private final java.text.NumberFormat commaFormat=java.text.NumberFormat.getIntegerInstance(Locale.US);
@@ -44,11 +45,13 @@ public final class Arena extends View {
  final ArrayList<Hit> hits=new ArrayList<>(); String screen="lobby",panel="",toast="",prevPhase="",lastFeed="";int venue=0,buy=200000,profile=0,page=0,pack=0,lastHand=-1,lastStreet=-1,raise=0,chipSeat=-2,focused=-2;boolean dbl=false,shopFromEntry=false;
  long now,born=SystemClock.uptimeMillis(),dealAt,boardAt,phaseAt,chipAt,focusAt,toastEnd;float scale=1,offX,offY,pressX,pressY,peel;String held="",pressSession="";int pressHand;boolean drag;
  static class Hit{RectF r;String key;Hit(float l,float t,float r,float b,String k){this.r=new RectF(l,t,r,b);key=k;}}
- Arena(GameActivity a){super(a);host=a;pub=image("title.jpg");pubMenu=new PubMenu(this);table=image("nine-room.jpg");busts=image("busts.png");deal.dealer=image("dealer.png");chipArt=image("chips.png");faces=image("faces.jpg");calm=image("calm.jpg");stage=new StageArt(this);acting=new SeatActing(this);finalTable=new FinalTableBanner(this);character=new CharacterProfile(this);display=new PubDisplay(this);cashier=new Cashier(this);setFocusable(true);}
+ Arena(GameActivity a){super(a);host=a;pub=image("title.jpg");pubMenu=new PubMenu(this);table=image("nine-room.jpg");busts=image("busts.png");deal.dealer=image("dealer.png");chipArt=image("chips.png");faces=image("faces.jpg");calm=image("calm.jpg");stage=new StageArt(this);acting=new SeatActing(this);tournamentBanner=new TournamentBanner(this);character=new CharacterProfile(this);display=new PubDisplay(this);cashier=new Cashier(this);setFocusable(true);}
  Bitmap image(String n){try(InputStream in=host.getAssets().open(n)){return BitmapFactory.decodeStream(in);}catch(IOException e){return null;}}
- boolean tableOpen(){return screen.equals("table")&&(panel.isEmpty()||panel.equals("tables")||panel.equals("wagers")||panel.equals("receipt")||panel.equals("profile"))&&g!=null;}
+ String rebuySoundSession="";
+ boolean rebuyWarningVisible(){return g!=null&&screen.equals("table")&&panel.isEmpty()&&g.optBoolean("rebuyNoticePending");}
+ boolean tableOpen(){return screen.equals("table")&&(panel.isEmpty()||panel.equals("tables")||panel.equals("wagers")||panel.equals("receipt")||panel.equals("profile"))&&g!=null&&!rebuyWarningVisible();}
  boolean live(){return tableOpen()&&!deal.running();}
- boolean back(){if(intro.blocking()){intro.finish();return true;}if(finalTable.showing())return true;if(panel.equals("shop"))host.rewardAds.leave();if(!panel.isEmpty()){if(panel.equals("surrender"))panel="pause";else if(panel.equals("profile"))panel=profileReturn;else if(panel.equals("confirm"))panel="shop";else if(panel.equals("shop")&&shopFromEntry){shopFromEntry=false;panel="entry";}else panel="";invalidate();return true;}if(screen.equals("table")){panel="pause";invalidate();return true;}return false;}
+ boolean back(){if(rebuyWarningVisible()){host.command("ackRebuyNotice","session",g.optString("sessionId"));return true;}if(intro.blocking()){intro.finish();return true;}if(tournamentBanner.showing())return true;if(panel.equals("shop"))host.rewardAds.leave();if(!panel.isEmpty()){if(panel.equals("surrender"))panel="pause";else if(panel.equals("profile"))panel=profileReturn;else if(panel.equals("confirm"))panel="shop";else if(panel.equals("shop")&&shopFromEntry){shopFromEntry=false;panel="entry";}else panel="";invalidate();return true;}if(screen.equals("table")){panel="pause";invalidate();return true;}return false;}
  String fmt(long n){
      String value=numbers.get(n);
      if(value==null){if(numbers.size()>=256)numbers.clear();value=commaFormat.format(n);numbers.put(n,value);}
@@ -58,7 +61,7 @@ public final class Arena extends View {
  void note(String s){toast=s;toastEnd=SystemClock.uptimeMillis()+2300;}
  void accept(JSONObject v){try{JSONObject old=g;snapshot=v;g=v.optJSONObject("g");opt=v.getJSONObject("opt");String msg=v.optString("notice");if(!msg.isEmpty())note(msg);if(old!=null&&g==null){screen="lobby";panel="result";}
  pocketTurnSampleAt=SystemClock.uptimeMillis();
- finalTable.observe(g);
+ tournamentBanner.observe(g);podium.observe(v);
  blindTicker.observe(g,pocketTurnSampleAt);
  if(old!=null&&g==null)acting.clear();
  washMotion.observe(old,g,SystemClock.uptimeMillis(),host.active&&screen.equals("table")&&panel.isEmpty());
@@ -75,8 +78,6 @@ public final class Arena extends View {
      host.fx("show",opt.optBoolean("voice",true)&&host.dealerVoice.ready()?.15f:.8f);
  if(old!=null&&old.optInt("actor")!=g.optInt("actor"))raise=0;
  if(!newHand&&!feed.equals(lastFeed)){JSONArray os=old.optJSONArray("p"),ps=g.optJSONArray("p");for(int i=0;i<Math.min(os.length(),ps.length());i++){JSONObject aa=os.optJSONObject(i),bb=ps.optJSONObject(i);if(aa.optInt("id")==bb.optInt("id")&&bb.optInt("bet")>aa.optInt("bet")){chipSeat=i;chipAt=t;if(opt.optBoolean("sound"))host.fx("chip",.65f);break;}}}lastFeed=feed;
- JSONObject tr=g.optJSONObject("tournament"),priorTr=old==null?null:old.optJSONObject("tournament");
- if(tr!=null&&tr.optBoolean("finalRebuyHand")&&(priorTr==null||!priorTr.optBoolean("finalRebuyHand")))note("리바인 가능한 마지막 핸드입니다.");
  JSONObject cs=g.optJSONObject("cashStats"),priorCs=old==null?null:old.optJSONObject("cashStats");
  if(cs!=null&&priorCs!=null&&cs.optInt("washedAt")>priorCs.optInt("washedAt")){
      JSONObject wash=cs.optJSONObject("lastWash");int credited=wash==null?0:wash.optInt("heroAmount");
@@ -120,7 +121,7 @@ public final class Arena extends View {
      now=SystemClock.uptimeMillis();
      if(intro.draw(canvas,now))return;
      boolean tableScreen=screen.equals("table")&&g!=null;
-     boolean room=tableScreen||panel.equals("entry");
+     boolean room=tableScreen||panel.equals("entry"),awardScreen=podium.showing();
      deal.update(now,host.active&&tableScreen&&panel.isEmpty());
      int w=getWidth(),h=getHeight();
      int playHeight=tableScreen?Math.max(1,h-stage.bet.dockPixels()):h;
@@ -128,7 +129,7 @@ public final class Arena extends View {
      offX=(w-1080*scale)/2;
      offY=Math.min((h-520*scale)/2,playHeight-520*scale);
      c.drawColor(ink);
-     if(!room)pubMenu.backdrop(w,h);
+     if(awardScreen)podium.backdrop(c,w,h);else if(!room)pubMenu.backdrop(w,h);
      c.save();c.translate(offX,offY);c.scale(scale,scale);
      if(tableScreen||!panel.isEmpty())c.clipRect(0,0,1080,520);
      hits.clear();
@@ -136,27 +137,45 @@ public final class Arena extends View {
      if(panel.equals("entry")&&venue<2)dailyBuyIn();
      else{
          if(tableScreen)game();
-         else if(!room)lobby();
-         if(panel.equals("tables"))display.draw();
+         else if(!room&&!awardScreen)lobby();
+         if(awardScreen)podium.draw();
+         else if(panel.equals("tables"))display.draw();
          else if(panel.equals("receipt"))receipt.draw(this);
          else if(panel.equals("shop")||panel.equals("confirm"))cashier.draw(panel.equals("confirm"));
          else if(panel.equals("profile"))character.draw();
          else if(panel.equals("wagers"))wages.detail();
          else if(!panel.isEmpty())overlay();
      }
-     if(now<toastEnd){
+     if(rebuyWarningVisible())drawRebuyWarning();
+     if(now<toastEnd&&!awardScreen&&!rebuyWarningVisible()){
          float tw=Math.min(860,Math.max(230,toast.length()*14));
          box(540-tw/2,10,540+tw/2,43,15,0xf4eadbbd);
          mid(toast,540,32,15,ink);
      }
      c.restore();
-     if(tableScreen){c.save();c.translate(offX,offY);c.scale(scale,scale);stage.bet.rail();c.restore();}
-     if(finalTable.showing()){hits.clear();held="";finalTable.draw(canvas,now);}
+     if(tableScreen&&!rebuyWarningVisible()){c.save();c.translate(offX,offY);c.scale(scale,scale);stage.bet.rail();c.restore();}
+     if(tournamentBanner.showing()){hits.clear();held="";tournamentBanner.draw(canvas,now);}
      host.frame(now);
      if(host.active){
-         if(screen.equals("lobby")&&panel.isEmpty())pubMenu.schedule();
+         if(awardScreen){if(podium.animating(now))postInvalidateOnAnimation();}
+         else if(screen.equals("lobby")&&panel.isEmpty())pubMenu.schedule();
          else postInvalidateOnAnimation();
      }
+ }
+ void drawRebuyWarning(){
+     String id=g.optString("sessionId");
+     if(host.active&&!id.equals(rebuySoundSession)){
+         rebuySoundSession=id;
+         if(opt.optBoolean("sound"))host.fx("rebuyBell",.65f);
+         if(opt.optBoolean("voice"))host.dealerVoice.lastRebuyLevel();
+     }
+     hits.clear();
+     box(0,0,1080,520,0,0xb30c1110);
+     stage.plate(248,142,832,365,0);
+     text("마지막 리바인 블라인드",540,210,32,paper,title,Paint.Align.CENTER);
+     text("5,000  /  10,000",540,252,31,gold,nums,Paint.Align.CENTER);
+     mid("이 레벨의 핸드까지 리바인할 수 있습니다.",540,285,16,paper);
+     key("확인",474,307,132,39,"ackRebuyNotice",1);
  }
  void lobby(){pubMenu.draw();}
  // Anchors on the painted armrest of the 1080 x 520 room, ordered around the table.
@@ -233,11 +252,17 @@ public final class Arena extends View {
  
  reset(-1);p.setShader(hudTop);c.drawRect(0,0,1080,72,p);
  p.setShader(hudBottom);c.drawRect(0,409,1080,520,p);p.setShader(null);
- int venueNow=g.optInt("pub");text(pubs[venueNow],22,28,22,paper,bold,Paint.Align.LEFT);txt(g.optBoolean("cash")?(g.optBoolean("double")?"더블보드":"원보드"):"데일리  ·  바이인 "+shortP(g.optInt("buyin",50000))+"P  ·  "+g.optInt("left")+"명 생존",23,48,12,muted);
+ int venueNow=g.optInt("pub");text(pubs[venueNow],22,28,22,paper,bold,Paint.Align.LEFT);
+ JSONObject tournament=g.optJSONObject("tournament");
+ if(tournament!=null&&tournament.optBoolean("bubble")){
+     stage.plate(10,31,198,60,0);
+     mid("버블 구간  ·  "+tournament.optInt("itmDistance")+"명 탈락 시 입상",104,50,12,gold);
+ }else txt(g.optBoolean("cash")?(g.optBoolean("double")?"더블보드":"원보드"):"데일리  ·  바이인 "+shortP(g.optInt("buyin",50000))+"P  ·  "+g.optInt("left")+"명 생존",23,48,12,muted);
  float blindX=g.optBoolean("cash")?550:611;
- String lvl=g.optBoolean("cash")?"블라인드":"LV. "+(g.optInt("level")+1);mid(lvl+"   "+fmt(g.optInt("sb"))+(g.optBoolean("double")?" SB":" / "+fmt(g.optInt("bb"))),blindX,23,17,gold);
- int sec=Math.max(0,240*(g.optInt("level")+1)-(int)g.optDouble("elapsed"));mid(g.optBoolean("cash")?"HAND "+g.optInt("hand"):"HAND "+g.optInt("hand")+"　·　"+(g.optInt("level")==9?"FINAL":String.format(Locale.US,"%d:%02d",sec/60,sec%60)),blindX,42,11,muted);
- JSONObject tournament=g.optJSONObject("tournament");if(tournament!=null&&tournament.optBoolean("finalRebuyHand"))mid("마지막 리바인 핸드",blindX,59,12,gold);
+ String lvl=g.optBoolean("cash")?"블라인드":"LV. "+(g.optInt("level")+1);String blinds=lvl+"   "+fmt(g.optLong("sb"))+(g.optBoolean("double")?" SB":" / "+fmt(g.optLong("bb")));
+ mid(blinds,blindX,23,Math.min(17,186f/Math.max(1,blinds.length())*1.6f),gold);
+ int sec=g.optInt("levelSecondsRemaining");mid(g.optBoolean("cash")?"HAND "+g.optInt("hand"):"HAND "+g.optInt("hand")+"　·　"+String.format(Locale.US,"%d:%02d",sec/60,sec%60),blindX,42,11,muted);
+ if(tournament!=null&&tournament.optBoolean("finalRebuyLevelActive"))mid("리바인 마지막 레벨",blindX,59,12,gold);
  washMotion.drawChips();musicButton(692,10);brass("테이블 현황",780,10,105,"tables");brass(fmt(snapshot.optInt("wallet"))+" P",887,10,126,"shop");brass("Ⅱ",1016,10,52,"pause");
  JSONArray ps=g.optJSONArray("p"),boards=g.optJSONArray("board");int hero=0;for(int i=0;i<ps.length();i++)if(ps.optJSONObject(i).optInt("id")==-1)hero=i;
  boolean db=g.optBoolean("double");int pot=g.optInt("pot");
@@ -310,31 +335,40 @@ public final class Arena extends View {
  void actionChip(float x,float y,String label,String amount,String id,int color){stage.button(x,y,label,amount,id);}
 
  void dailyBuyIn(){
-     int tables=venue==0?2:4,entrants=tables*9;
+     JSONArray entries=snapshot.optJSONArray("tournamentEntries");
+     JSONObject event=entries==null?null:entries.optJSONObject(venue);
+     JSONArray offers=event==null?null:event.optJSONArray("offers");
+     JSONObject selected=null;
+     for(int i=0;offers!=null&&i<offers.length();i++){
+         JSONObject offer=offers.optJSONObject(i);
+         if(offer!=null&&offer.optInt("buyin")==fee){selected=offer;break;}
+     }
      int[] fees=PubMenu.FEES[venue];
      hits.clear();
      grad(0,0,1080,189,0xed101812,0x00101812,true);
      grad(0,365,1080,520,0x00101812,0xed101812,true);
      text(pubs[venue],39,45,25,paper,title,Paint.Align.LEFT);
-     txt("데일리 토너먼트   ·   9인 × "+tables+"테이블",40,72,17,gold);
+     txt("데일리 토너먼트",40,72,17,gold);
      musicButton(828,19);brass("돌아가기",933,19,110,"close");
-     mid("바이인 선택",540,119,28,paper);mid("참가 "+entrants+"명  ·  테이블당 9명  ·  시작 시 "+entrants+"바이인",540,151,16,paper);
+     mid("바이인 선택",540,99,28,paper);
+     if(event!=null)mid(event.optInt("tables")+"테이블  ·  참가 "+event.optInt("initial")+"명  ·  시작 50,000칩",540,128,16,paper);
      int[] colors={0xffa94d40,0xff567e91,0xff527b57,0xff775b88};
      for(int i=0;i<fees.length;i++){
-         float x=540+(i-(fees.length-1)/2f)*182,y=277;
+         float x=540+(i-(fees.length-1)/2f)*182,y=245;
          boolean on=fee==fees[i];
          if(on){reset(0x9ce8b465);p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(2);c.drawOval(x-63,y-16,x+63,y+17,p);}
          float bounce=on?Math.max(0,1-(now-feeChangedAt)/320f):0;
          float lift=on?7+10*(float)Math.sin(bounce*Math.PI):0;
          if(chipArt!=null){int cw=chipArt.getWidth()/2,ch=chipArt.getHeight()/2;Rect src=new Rect(i%2*cw,i/2*ch,(i%2+1)*cw,(i/2+1)*ch);reset(-1);c.drawBitmap(chipArt,src,new RectF(x-70,y-115-lift,x+70,y+20-lift),p);}
          else{c.save();c.translate(x,y-lift);c.scale(3.8f,3.3f);chip(0,0,i+2,colors[i]);c.restore();}
-         mid(shortP(fees[i])+"P",x,310,on?25:22,on?gold:paper);
-         hit(x-77,167,x+77,320,"fee"+i);
+         mid(shortP(fees[i])+"P",x,279,on?25:22,on?gold:paper);
+         hit(x-77,133,x+77,286,"fee"+i);
      }
-     mid("시작 50,000칩   ·   리바인 전 총상금 "+shortP(fee*entrants)+"P",540,351,19,paper);
-     stage.plate(224,359,856,399,0);stage.prizes(fee*entrants,540,385,179);
+     if(selected!=null)display.entryPrizes(selected);
      txt("내 지갑   "+fmt(snapshot.optInt("wallet"))+" P",39,465,18,paper);
-     txt("10,000 / 20,000 마지막 핸드까지  ·  리바인 횟수 제한 없음  ·  1회 "+shortP(fee)+"P",40,490,14,muted);
+     String share=selected!=null&&selected.has("prizeContributionRate")
+            ?"  ·  바이인·리바인 "+Math.round(selected.optDouble("prizeContributionRate")*100)+"% 상금 적립":"";
+     txt("5,000 / 10,000 마지막 핸드까지 무제한 리바인  ·  1회 "+shortP(fee)+"P"+share,40,490,14,muted);
      boolean enough=snapshot.optInt("wallet")>=fee;
      key(enough?shortP(fee)+"P 바이인 · 착석":"포인트 충전",806,432,236,58,enough?"enter":"shop",1);
  }
@@ -361,12 +395,13 @@ public final class Arena extends View {
  }
  void bar(float l,float y,float r,String key,int min,int max,int v){float f=max==min?0f:(v-min)/(float)(max-min);box(l,y-3,r,y+3,3,0xff586154);box(l,y-3,l+(r-l)*f,y+3,3,gold);reset(paper);c.drawCircle(l+(r-l)*f,y,10,p);hit(l-14,y-25,r+14,y+25,key);}
  void slider(String k,float x){if(k.equals("buy")){int max=Math.max(200000,Math.min(snapshot.optInt("wallet"),700000));buy=Math.max(200000,Math.min(max,(int)Math.round((200000+(max-200000)*Math.max(0,Math.min(1,(x-297)/483)))/1000.0)*1000));if(x>=779)buy=max;}if(k.equals("amount")&&g!=null){int min=g.optInt("min"),max=g.optInt("max");raise=Math.max(min,Math.min(max,(int)Math.round((min+(max-min)*Math.max(0,Math.min(1,(x-295)/490)))/100.0)*100));if(x>=784)raise=max;}}
- @Override public boolean onTouchEvent(MotionEvent e){if(intro.touch(e)||finalTable.touch(e))return true;float x=(e.getX()-offX)/scale,y=(e.getY()-offY)/scale;switch(e.getActionMasked()){case MotionEvent.ACTION_DOWN:held="";pressX=x;pressY=y;drag=false;pressHand=g==null?-1:g.optInt("hand");pressSession=g==null?"":g.optString("sessionId");for(int i=hits.size()-1;i>=0;i--)if(hits.get(i).r.contains(x,y)){held=hits.get(i).key;break;}if(held.equals("buy")||held.equals("amount"))slider(held,x);invalidate();return true;
+ @Override public boolean onTouchEvent(MotionEvent e){if(intro.touch(e)||tournamentBanner.touch(e))return true;float x=(e.getX()-offX)/scale,y=(e.getY()-offY)/scale;switch(e.getActionMasked()){case MotionEvent.ACTION_DOWN:held="";pressX=x;pressY=y;drag=false;pressHand=g==null?-1:g.optInt("hand");pressSession=g==null?"":g.optString("sessionId");for(int i=hits.size()-1;i>=0;i--)if(hits.get(i).r.contains(x,y)){held=hits.get(i).key;break;}if(held.equals("buy")||held.equals("amount"))slider(held,x);invalidate();return true;
  case MotionEvent.ACTION_MOVE:if(held.equals("peek")){peel=Math.min(175,(float)Math.hypot(x-pressX,y-pressY)*2.4f);if(peel>110&&!drag){drag=true;host.command("peek");}}else slider(held,x);invalidate();return true;
  case MotionEvent.ACTION_UP:String a=held;held="";if(a.equals("buy")||a.equals("amount"))slider(a,x);else if((a.equals("peek")||Math.hypot(x-pressX,y-pressY)<36)&&(!BetArt.railKey(a)||stage.bet.tapStillValid(a,x,y)))action(a);peel=0;performClick();invalidate();return true;
  case MotionEvent.ACTION_CANCEL:held="";peel=0;return true;}return true;}
  @Override public boolean performClick(){super.performClick();return true;}
  void action(String a){if(a.isEmpty()||!host.loaded)return;if(opt.optBoolean("sound")&&!a.equals("peek"))host.fx("tap",.26f);
+ if(rebuyWarningVisible()){if(a.equals("ackRebuyNotice"))host.command(a,"session",g.optString("sessionId"));return;}
  if(a.equals("voiceSample")){host.dealerVoice.preview();return;}
  if(a.equals("replayIntro")&&screen.equals("lobby")&&panel.isEmpty()){intro.replay();return;}
  if(a.startsWith("exit@")){if(panel.equals("surrender"))host.command("surrender","token",a.substring(5));return;}

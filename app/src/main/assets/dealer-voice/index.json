@@ -546,5 +546,13 @@
   "final-table": [
     "final_table",
     2030
+  ],
+  "heads-up": [
+    "heads_up",
+    2400
+  ],
+  "rebuy-level": [
+    "rebuy_level",
+    3510
   ]
 }

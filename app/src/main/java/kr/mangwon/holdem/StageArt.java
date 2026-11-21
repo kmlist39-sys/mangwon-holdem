@@ -223,55 +223,6 @@ final class StageArt {
         a.mid(seconds+"초 뒤 자동 진행",956,top+40,12,a.ink);
         a.hit(856,445,1056,501,"next");
     }
-    void prizes(int pool,float center,float y,float gap){
-        int[] pct={50,30,20};for(int i=0;i<3;i++)a.mid((i+1)+"위  "+a.shortP((int)((long)pool*pct[i]/100))+"P  ("+pct[i]+"%)",center+(i-1)*gap,y,15,i==0?a.gold:a.paper);
-    }
-    void tables(){
-        JSONArray ts=tablesData();if(ts==null)return;a.hits.clear();
-        a.box(0,0,1080,520,0,0xc30a120e);a.box(63,22,1017,498,12,0xff1a2d25);
-        a.stroke(63,22,1017,498,12,0xffa2845b,1);
-        a.text("테이블 현황",93,64,28,a.paper,a.title,Paint.Align.LEFT);
-        a.brass("닫기",907,37,80,"close");
-        ChipLeaders.draw(a,true);
-        boolean cash=a.g.optBoolean("cash");
-        a.txt(cash?(a.g.optBoolean("double")?"더블보드":"원보드")+"  ·  바이인 "+a.fmt(a.g.optInt("buyin"))+"P  ·  핸드별 팟 정산":
-            "생존 "+a.g.optInt("left")+" / "+a.g.optInt("entrants")+"명      총 "+a.g.optInt("entries")+"바이인  (리바인 "+a.g.optInt("rebuyCount")+"회)      총상금 "+a.fmt(a.g.optInt("pool"))+"P",94,99,17,a.gold);
-        int first=tablePage*2;
-        for(int slot=first;slot<Math.min(first+2,tableCount);slot++){
-            int index=tableOrder[slot];JSONObject t=ts.optJSONObject(index);
-            float x=96+(slot-first)*458;
-            String title=(tableCount==1&&!cash?"파이널  ·  ":"")+"테이블 "+t.optInt("number",index+1);
-            a.txt(title+(index==heroTable?"  ·  내 자리":""),x,144,21,a.paper);
-            a.txt(t.optInt("seats")+"명 착석   ·   "+street(t)+"   ·   남은 패 "+t.optInt("remain")+"명"+(t.optInt("incoming")>0?"   ·   착석 대기 "+t.optInt("incoming")+"명":""),x,170,15,a.muted);
-            a.txt("팟  "+a.fmt(t.optInt("pot")),x,196,15,a.gold);
-            JSONArray ps=t.optJSONArray("players");
-            for(int k=0;k<ps.length();k++){
-                JSONObject p=ps.optJSONObject(k);float y=223+k*(ps.length()==9?21:23);
-                int id=p.optInt("id",-1);
-                a.txt(p.optString("name"),x,y,15,p.optBoolean("fold")?a.muted:a.paper);
-                if(id>=0){
-                    if(p.optInt("tier")==2)a.txt("최상급",x+55,y,11,a.gold);
-                    a.txt("›",x+96,y,16,a.gold);
-                    a.hit(x-4,y-16,x+367,y+4,"person"+id);
-                }
-                a.text(a.fmt(p.optInt("stack")),x+173,y,15,a.paper,a.nums,Paint.Align.RIGHT);
-                if(p.optBoolean("active")){a.txt("차례",x+194,y,13,a.gold);gauge(t,x+234,y-6,105,true);}
-                else if(p.optBoolean("fold"))a.txt("폴드",x+194,y,12,a.muted);
-            }
-        }
-        a.line(96,413,982,413,0xff71674b,1);
-        if(!cash)prizes(a.g.optInt("pool"),540,443,273);
-        JSONObject transfer=a.g.optJSONObject("lastTransfer");
-        String footer=transfer!=null?"최근 이동  "+transfer.optString("name")+"   "+transfer.optInt("from")+"번 → "+transfer.optInt("to")+"번":
-            "이름을 누르면 인물 소개를 봅니다.";
-        if(tableCount>2){
-            int pages=(tableCount+1)/2;
-            if(tablePage>0)a.key("‹  이전",95,451,115,39,"tablePrev",0);
-            if(tablePage+1<pages)a.key("다음  ›",870,451,115,39,"tableNext",0);
-            footer=(tablePage+1)+" / "+pages+"쪽     ·     "+footer;
-        }
-        a.mid(footer,540,478,14,transfer==null?a.muted:a.paper);
-    }
     void showdownTitle(){
         if(a.panel.length()>0 || !a.host.active)return;
         if(lastTitleFrame!=0)titleElapsed+=Math.max(0,Math.min(64,a.now-lastTitleFrame));

@@ -12,7 +12,8 @@ final class BlindTicker {
     private final Arena arena;
     private final Paint type = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.SUBPIXEL_TEXT_FLAG);
     private String session = "", message = "";
-    private int hand, small, big;
+    private int hand;
+    private long small, big;
     private float textWidth;
     private long began;
 
@@ -25,7 +26,8 @@ final class BlindTicker {
             return;
         }
         String id = game.optString("sessionId");
-        int next = upcoming.optInt("hand"), sb = upcoming.optInt("sb"), bb = upcoming.optInt("bb");
+        int next = upcoming.optInt("hand");
+        long sb = upcoming.optLong("sb"), bb = upcoming.optLong("bb");
         if (!message.isEmpty() && session.equals(id) && hand == next && small == sb && big == bb) return;
         session = id;
         hand = next;

@@ -13,12 +13,41 @@ final class PubDisplay {
     private final Bitmap monitor;
     boolean seats;
     private static final int WHITE=0xffe9f0f4, GREY=0xffa3b3bf, AMBER=0xffffcd86, MINT=0xff8ed3ba;
-    private static final int[] SMALL={100,200,400,500,1000,2000,4000,5000,10000,20000};
     private final Typeface clockFace=Typeface.create("sans-serif-condensed",Typeface.BOLD);
 
     PubDisplay(Arena arena){a=arena;monitor=a.image("tournament-monitor.jpg");}
 
     void open(){seats=false;a.stage.openTables();}
+    void entryPrizes(JSONObject offer){
+        // Stretch the lacquered centre independently of the original brass end caps.
+        if(a.stage.trim!=null){
+            a.stage.bet.part(a.stage.trim,0,.103f,.079f,.48f,132,286,192,431,255);
+            a.stage.bet.part(a.stage.trim,.079f,.103f,.421f,.48f,192,286,888,431,255);
+            a.stage.bet.part(a.stage.trim,.421f,.103f,.5f,.48f,888,286,948,431,255);
+        }else a.box(132,286,948,431,18,0xff142a22);
+        a.txt("리바인 전 총상금",189,332,16,a.paper);
+        a.text(a.fmt(offer.optLong("pool"))+" P",187,367,31,a.gold,a.nums,Paint.Align.LEFT);
+        a.text("상위 "+offer.optInt("paidPlaces")+"명 머니인",189,399,17,a.paper,a.bold,Paint.Align.LEFT);
+        a.line(416,315,416,402,0x685f806c,1);
+        prizeRows(offer,446,885,335,28,a.paper,a.gold,0xffbfd0be);
+    }
+
+    private void prizeRows(JSONObject schedule,float left,float right,float top,float lineHeight,
+                           int body,int first,int secondary){
+        JSONArray amounts=schedule.optJSONArray("payouts"),percent=schedule.optJSONArray("payoutPercentages");
+        if(amounts==null||amounts.length()==0)return;
+        int count=amounts.length(),rows=(count+1)/2;
+        float width=(right-left-32)/2;
+        for(int i=0;i<count;i++){
+            float x=left+(i/rows)*(width+32);
+            float y=top+(3-rows)*lineHeight/2+(i%rows)*lineHeight;
+            int color=i==0?first:body;
+            a.text((i+1)+"위",x,y,17,color,a.bold,Paint.Align.LEFT);
+            if(percent!=null&&i<percent.length())
+                a.text(percent.optInt(i)+"%",x+58,y,14,secondary,a.nums,Paint.Align.RIGHT);
+            a.text(a.fmt(amounts.optLong(i))+" P",x+width,y,20,color,a.nums,Paint.Align.RIGHT);
+        }
+    }
     void tab(String label,float x,float width,String key,boolean selected){
         if(selected)a.box(x,43,x+width,73,5,0xff293c45);
         a.mid(label,x+width/2,64,15,selected?WHITE:GREY);
@@ -41,50 +70,51 @@ final class PubDisplay {
         if(t==null)t=new JSONObject();
         int lvl=a.g.optInt("level"),alive=t.optInt("alive",a.g.optInt("left"));
         boolean rest=a.g.optBoolean("break"), finalHand=t.optBoolean("finalRebuyHand");
-        int elapsed=(int)a.g.optDouble("elapsed"),left=Math.max(0,(lvl+1)*240-elapsed);
+        int left=Math.max(0,(int)Math.ceil(a.g.optDouble("levelSecondsRemaining",0)));
         if(rest)left=(int)Math.ceil(a.g.optDouble("breakLeft"));
-        String tm=!rest&&lvl==9?"FINAL":String.format(Locale.US,"%02d:%02d",left/60,left%60);
+        String tm=String.format(Locale.US,"%02d:%02d",left/60,left%60);
         a.txt(rest?"휴식 시간":"블라인드 레벨  "+String.format(Locale.US,"%02d",lvl+1),60,117,17,MINT);
         a.text(tm,56,211,91,WHITE,clockFace,Paint.Align.LEFT);
         a.box(61,229,453,233,2,0xff30434d);
         float bar=rest?0:Math.min(1,left/240f);
         if(bar>0)a.box(61,229,61+392*bar,233,2,MINT);
         a.txt("현재 블라인드",61,265,15,GREY);
-        a.text(a.fmt(a.g.optInt("sb"))+" / "+a.fmt(a.g.optInt("bb")),59,307,34,AMBER,a.nums,Paint.Align.LEFT);
-        if(lvl+1<SMALL.length){int small=SMALL[lvl+1];a.txt("다음   "+a.fmt(small)+" / "+a.fmt(small*2),61,336,16,GREY);}
-        String re=finalHand?"이번 핸드가 마지막 리바인입니다":t.optBoolean("rebuyOpen",lvl<=8)?"리바인 접수 중  ·  10,000 / 20,000까지":"리바인 마감";
+        a.text(a.fmt(a.g.optLong("sb"))+" / "+a.fmt(a.g.optLong("bb")),59,307,34,AMBER,a.nums,Paint.Align.LEFT);
+        JSONObject next=a.g.optJSONObject("nextLevelBlinds");
+        if(next!=null)a.txt("다음   "+a.fmt(next.optLong("sb"))+" / "+a.fmt(next.optLong("bb")),61,336,16,GREY);
+        String re=finalHand?"이번 핸드가 마지막 리바인입니다":t.optBoolean("rebuyOpen")?"리바인 접수 중  ·  5,000 / 10,000까지":"리바인 마감";
         a.txt(re,61,370,15,finalHand?AMBER:MINT);
         a.line(479,108,479,379,0xff35434f,1);
-        metric("생존 플레이어",String.valueOf(alive),506,118);
-        metric("총 엔트리",String.valueOf(t.optInt("entries",a.g.optInt("entries"))),680,118);
-        metric("리바인",String.valueOf(t.optInt("rebuys",a.g.optInt("rebuyCount"))),858,118);
+        metric("생존 / 시작 인원",alive+" / "+t.optInt("initial"),506,114);
+        metric("총 엔트리",String.valueOf(t.optInt("entries")),714,114);
+        metric("리바인",String.valueOf(t.optInt("rebuys")),888,114);
         a.line(506,186,1017,186,0xff35434f,1);
-        a.txt("평균 스택",506,212,15,GREY);
-        a.text(a.fmt(t.optInt("average"))+" 칩",1017,213,21,WHITE,a.nums,Paint.Align.RIGHT);
-        a.txt("상금 순위",506,254,15,MINT);
-        JSONArray payouts=a.g.optJSONArray("payouts"),leaders=a.g.optJSONArray("leaders");
-        for(int i=0;i<3;i++){
-            float y=282+i*35;
-            a.txt((i+1)+"위",506,y,15,i==0?AMBER:GREY);
-            a.txt(a.fmt(payouts==null?0:payouts.optInt(i))+" P",566,y,18,WHITE);
-        }
-        a.line(748,240,748,362,0xff35434f,1);
-        a.txt("칩 순위",770,254,15,MINT);
+        a.text("머니인 · 상위 "+t.optInt("paidPlaces")+"명",506,218,19,MINT,a.bold,Paint.Align.LEFT);
+        a.text("총상금  "+a.fmt(t.optLong("pool"))+" P",1017,218,20,AMBER,a.nums,Paint.Align.RIGHT);
+        prizeRows(t,506,1017,259,30,WHITE,AMBER,GREY);
+        a.line(506,338,1017,338,0xff35434f,1);
+        a.txt("평균 스택",506,368,15,GREY);
+        a.text(a.fmt(t.optInt("average"))+" 칩",1017,369,20,WHITE,a.nums,Paint.Align.RIGHT);
+        a.line(57,390,1018,390,0xff41505d,1);
+        a.txt("칩 순위",60,416,15,MINT);
+        JSONArray leaders=a.g.optJSONArray("leaders");
         for(int i=0;leaders!=null&&i<Math.min(3,leaders.length());i++){
-            JSONObject p=leaders.optJSONObject(i);
-            float y=282+i*35;
-            a.txt(p.optInt("rank")+"  "+p.optString("name"),770,y,15,i==0?AMBER:WHITE);
-            a.text(p.optString("display"),1017,y,16,WHITE,a.nums,Paint.Align.RIGHT);
+            JSONObject player=leaders.optJSONObject(i);
+            if(player==null)continue;
+            float x=60+i*137;
+            a.txt(player.optInt("rank")+"위 "+player.optString("name"),x,440,15,i==0?AMBER:WHITE);
+            a.text(player.optString("display"),x,463,17,WHITE,a.nums,Paint.Align.LEFT);
         }
-        a.line(57,394,1018,394,0xff41505d,1);
-        a.txt("총상금",60,424,15,GREY);
-        a.text(a.fmt(a.g.optInt("pool"))+" P",59,459,29,AMBER,a.nums,Paint.Align.LEFT);
+        a.line(479,405,479,469,0xff35434f,1);
+        a.txt("테이블 현황",506,416,15,MINT);
         for(int i=0;i<a.stage.tableCount;i++){
             int idx=a.stage.tableOrder[i];
             JSONObject table=a.stage.tablesData().optJSONObject(idx);
-            float x=380+i*159;
-            a.txt((a.stage.tableCount==1?"파이널":"테이블 "+table.optInt("number"))+(idx==a.stage.heroTable?" · 내 자리":""),x,424,15,GREY);
-            a.txt(table.optInt("seats")+"명  ·  "+a.stage.street(table),x,452,15,WHITE);
+            float x=506+(i%2)*264,y=440+(i/2)*23;
+            String name=a.stage.tableCount==1?"파이널":table.optInt("number")+"번";
+            if(idx==a.stage.heroTable)name+=" · 내 자리";
+            a.txt(name,x,y,15,idx==a.stage.heroTable?AMBER:GREY);
+            a.text(table.optInt("seats")+"명  ·  "+a.stage.street(table),x+247,y,15,WHITE,a.normal,Paint.Align.RIGHT);
         }
     }
     private void metric(String label,String value,float x,float y){
