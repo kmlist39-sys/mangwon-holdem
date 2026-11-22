@@ -6,7 +6,7 @@ import org.json.JSONObject;
 /** A discarded hand settles on its own patch of felt before fading away. */
 final class FoldMotion {
     private final Arena a;
-    private final boolean[] hadBadge=new boolean[51];
+    private final boolean[] hadBadge=new boolean[CastArt.COUNT+1];
     private final Pose pose=new Pose();
 
     FoldMotion(Arena arena){a=arena;}

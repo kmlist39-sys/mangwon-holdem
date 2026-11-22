@@ -17,15 +17,15 @@ import android.graphics.Shader;
 /** The three painted club entrances share a common brass rail and a single touch coordinate system. */
 final class PubMenu {
     static final int[][] FEES = {{50000, 100000}, {100000, 150000, 200000}};
-    private static final String[] NAMES = {"망원동", "성산동", "당산"};
+    private static final String[] NAMES = {"망원동", "마포구", "당산"};
     private static final String[] KEYS = {"venue0", "venue1", "venue2"};
     private static final String[] MOTTO = Arena.LOBBY_SLOGAN.split(" ");
     private static final String[] FORMATS = {
-        "데일리 토너먼트  ·  2테이블 18명",
-        "데일리 토너먼트  ·  4테이블 36명",
+        "데일리 토너먼트  ·  2–4테이블",
+        "마포구 대회  ·  12 / 24테이블",
         "원보드 / 더블보드  ·  6인 또는 9인"
     };
-    private static final String[] STAKES = {"5만 – 10만 P", "10만 – 20만 P", "20만 – 70만 P"};
+    private static final String[] STAKES = {"5만 – 10만 P", "10만 – 20만 P", "20만 – 200만 P"};
     private static final int[] INKS = {0x071713, 0x1e0e13, 0x071a29};
     private static final int[] HIGHLIGHTS = {0xfff8d69b, 0xffe6b6a0, 0xffb6dced};
     private static final int IVORY = 0xffffedcc, BRASS = 0xffd7bc88;
@@ -34,7 +34,7 @@ final class PubMenu {
     private static final Paint.Align LEFT = Paint.Align.LEFT, RIGHT = Paint.Align.RIGHT;
 
     private final Arena a;
-    private final Portrait[] portraits = new Portrait[3];
+    private final Bitmap[] portraits = new Bitmap[3];
     private final float[] presses = new float[3];
     private final float[] nameWidths = new float[3];
     private final float[] mottoWidths = new float[MOTTO.length];
@@ -53,20 +53,23 @@ final class PubMenu {
     private final Matrix foilPosition = new Matrix();
     private LinearGradient headerShade;
     private float left, right, top, bottom, span;
-    private int width, height, lastWallet = -1, lastHand = -1, lastBuy = -1, lastMode = -1;
-    private String wallet = "", liveFormat = "", liveBuy = "";
+    private int width, height, lastWallet = -1;
+    private String wallet = "";
+    final VenueArrival arrival;
     private long clock, lastFrame, lastMotionCheck, entered;
     private boolean motion = true, firstFrame = true, moving;
 
     PubMenu(Arena arena) {
         a = arena;
+        arrival = new VenueArrival(arena,this);
         Bitmap atlas = a.image("lobby-venues.webp");
         if (atlas == null) atlas = a.image("venue-doors.jpg");
         for (int i = 0; i < portraits.length; i++) {
-            if (atlas != null) {
+            portraits[i] = a.image("arrival-"+VenueArrival.ART[i]+"-still.webp");
+            if (portraits[i]==null && atlas != null) {
                 int x = i * atlas.getWidth()/3;
                 Bitmap art = Bitmap.createBitmap(atlas,x,0,(i+1)*atlas.getWidth()/3-x,atlas.getHeight());
-                portraits[i] = new Portrait(art,i);
+                portraits[i] = art;
             }
             glyphWidths[i] = new float[NAMES[i].length()];
             letters.setTypeface(a.title);
@@ -123,7 +126,6 @@ final class PubMenu {
             c.save(); c.clipRect(l,top,r,bottom);
             if (portraits[i]!=null) drawPainting(i,l,r);
             else c.drawColor(0xff000000|INKS[i]);
-            if (a.g!=null && i!=liveVenue()) c.drawColor(0x86101417);
             fill(veils[i],l,top,r,bottom);
             c.restore();
         }
@@ -138,8 +140,7 @@ final class PubMenu {
     }
 
     private void drawPainting(int i, float l, float r) {
-        Portrait portrait = portraits[i];
-        Bitmap art = portrait.art;
+        Bitmap art = portraits[i];
         float sw = art.getWidth(), sh = art.getHeight();
         double phase = clock*(2*Math.PI/(i==1 ? 10900 : i==2 ? 13700 : 12100)) + i*1.7;
         // Overscan gives the slow camera a few pixels to travel with no exposed edges.
@@ -150,11 +151,33 @@ final class PubMenu {
         Canvas c = a.c;
         c.save(); c.translate(x,y); c.scale(scale*sw,scale*sh);
         solid(Color.WHITE);
-        portrait.draw(c,paint,clock,motion);
+        bounds.set(0,0,1,1);c.drawBitmap(art,null,bounds,paint);
         if (motion) sceneLight(i,phase);
         c.restore();
     }
 
+    void arrivingPortrait(int i,float center,float zoom,Bitmap sheet,int frame,float edgeFade,Paint edgePaint){
+        Bitmap still=portraits[i];
+        if(still==null)return;
+        float sw=still.getWidth(),sh=still.getHeight();
+        float base=Math.max(span/sw,(bottom-top)/sh)*1.026f;
+        float dw=sw*base*zoom,dh=sh*base*zoom;
+        Canvas c=a.c;
+        c.save();c.translate(center-dw/2,(top+bottom-dh)/2);c.scale(dw,dh);
+        int layer=edgeFade>0?c.saveLayer(0,0,1,1,null):-1;
+        bounds.set(0,0,1,1);solid(Color.WHITE);
+        if(sheet==null)c.drawBitmap(still,null,bounds,paint);
+        else{
+            int col=frame%4,row=frame%12/4,cellW=sheet.getWidth()/4,cellH=sheet.getHeight()/3;
+            chipSource.set(col*cellW,row*cellH,(col+1)*cellW,(row+1)*cellH);
+            c.drawBitmap(sheet,chipSource,bounds,paint);
+        }
+        if(layer>=0){
+            edgePaint.setAlpha(Math.round(255*edgeFade));
+            c.drawRect(0,0,1,1,edgePaint);c.restoreToCount(layer);
+        }
+        c.restore();
+    }
     /** Scene effects are located on the objects in each illustration, in UV coordinates. */
     private void sceneLight(int i, double phase) {
         if (i==0) {
@@ -228,7 +251,6 @@ final class PubMenu {
 
     void controls() {
         headerButtons();
-        if (a.g!=null) sessionText();
         for (int i=0;i<3;i++) venue(i);
     }
 
@@ -242,6 +264,7 @@ final class PubMenu {
         boolean music=a.host.musicEnabled;
         int muted=music ? 0xffe0d9c3 : 0xffaba99d;
         float soundX=walletLeft-104;
+        a.brass("GTO 구매하기",soundX-129,y-15,118,"gtoStore");
         paint.setStrokeCap(Paint.Cap.ROUND);
         a.line(soundX+8,y+4,soundX+8,y-8,muted,1.8f);
         a.line(soundX+8,y-8,soundX+14,y-6,muted,2);
@@ -277,30 +300,22 @@ final class PubMenu {
         solid(0xffdaccad); a.c.drawCircle(x,y,1.7f,paint);
     }
 
-    private void sessionText() {
-        int hand=a.g.optInt("hand"), buy=a.g.optInt("buyin");
-        int mode=a.g.optBoolean("cash") ? (a.g.optBoolean("double") ? 2 : 1) : 0;
-        if (lastHand==hand && lastBuy==buy && lastMode==mode) return;
-        String format=mode==2 ? "더블보드" : mode==1 ? "원보드" : "데일리 토너먼트";
-        liveFormat=format+"  ·  "+hand+"번째 핸드";
-        liveBuy=a.shortP(buy)+" P";
-        lastHand=hand; lastBuy=buy; lastMode=mode;
-    }
-
     private void venue(int i) {
-        boolean session=a.g!=null, selected=i==liveVenue(), playable=!session||selected;
+        org.json.JSONObject seat=a.savedVenue(i);
+        boolean session=seat!=null, selected=i==liveVenue(), playable=true;
         float l=left+i*span, r=l+span, x=l+23;
         int info=playable ? 0xffe2dece : 0xffa9adab;
         float lift=presses[i]*2.6f;
-        a.text(session&&selected?liveFormat:FORMATS[i],x,bottom-108-lift,16,info,a.bold,LEFT);
+        String format = session ? (i==2 ? (seat.optBoolean("double")?"더블보드":"원보드") : "토너먼트")+"  ·  "+seat.optInt("hand")+"번째 핸드" : FORMATS[i];
+        a.text(format,x,bottom-108-lift,16,info,a.bold,LEFT);
         sign(i,x,bottom-62-lift,playable);
         a.line(x,bottom-49,r-22,bottom-49,playable?0x775f695c:0x555f695c,1);
         a.text("바이인",x,bottom-21,14,info,a.normal,LEFT);
-        a.text(session&&selected?liveBuy:STAKES[i],x+49,bottom-20,19,
+        a.text(session?a.shortP(seat.optInt("buyin"))+" P":STAKES[i],x+49,bottom-20,19,
             playable ? IVORY : info,a.nums,LEFT);
         if (playable) {
-            String cta=session ? "내 자리로 돌아가기" : "입장";
-            float targetRight=r-19, targetLeft=targetRight-(session ? 142 : 72);
+            String cta=session ? "이어하기" : "입장";
+            float targetRight=r-19, targetLeft=targetRight-(session ? 89 : 72);
             if (selected) {
                 a.stage.plate(targetLeft,bottom-44+presses[i],targetRight,bottom-7+presses[i],1);
                 a.text(cta,(targetLeft+targetRight)*.5f-4,bottom-19+presses[i],
@@ -310,7 +325,7 @@ final class PubMenu {
                 a.text(cta,targetRight-21,bottom-20,15,HIGHLIGHTS[i],a.bold,RIGHT);
                 chevron(targetRight-7,bottom-25,HIGHLIGHTS[i]);
             }
-            a.hit(l,top+58,r,bottom,session?"entry":KEYS[i]);
+            a.hit(l,top+58,r,bottom,KEYS[i]);
         }
         a.line(l+1,top+57,r-1,top+57,selected?0xffebc88d:0x3caaa082,selected?2:1);
     }
@@ -347,7 +362,7 @@ final class PubMenu {
             x+=glyphWidths[i][j];
         }
         letters.setShader(null);
-        a.text("홀덤펍",start+nameWidths[i]+10,y-1,20,
+        a.text(i==1?"홀덤대회":"홀덤펍",start+nameWidths[i]+10,y-1,20,
             playable?HIGHLIGHTS[i]:0xffa9ada7,a.title,LEFT);
     }
 
@@ -358,46 +373,4 @@ final class PubMenu {
         else a.postInvalidateDelayed(33);
     }
 
-    /** A low-resolution deformation grid gently separates the portrait, foreground hand and room. */
-    private static final class Portrait {
-        private static final int COLS=17, ROWS=21, COUNT=(COLS+1)*(ROWS+1);
-        final Bitmap art;
-        private final int index;
-        private final float[] rest=new float[COUNT*2], mesh=new float[COUNT*2];
-        private final float[] head=new float[COUNT], body=new float[COUNT], hand=new float[COUNT];
-
-        Portrait(Bitmap bitmap,int scene) {
-            art=bitmap; index=scene;
-            float hx=scene==0?.55f:scene==1?.48f:.65f, hy=scene==0?.275f:.25f;
-            float fx=scene==0?.39f:scene==1?.44f:.57f, fy=scene==1?.37f:.82f;
-            for (int j=0;j<=ROWS;j++) for (int i=0;i<=COLS;i++) {
-                int k=j*(COLS+1)+i; float u=i/(float)COLS,v=j/(float)ROWS;
-                rest[k*2]=u; rest[k*2+1]=v;
-                float edge=Math.min(1,Math.min(Math.min(u,1-u),Math.min(v,1-v))*10);
-                head[k]=edge*falloff(u,v,hx,hy,.29f,.25f);
-                body[k]=edge*falloff(u,v,.52f,.55f,.53f,.37f);
-                hand[k]=edge*falloff(u,v,fx,fy,.20f,.14f);
-            }
-        }
-
-        private static float falloff(float x,float y,float cx,float cy,float rx,float ry) {
-            float dx=(x-cx)/rx, dy=(y-cy)/ry;
-            float v=Math.max(0,1-dx*dx-dy*dy); return v*v*(3-2*v);
-        }
-
-        void draw(Canvas c,Paint p,long clock,boolean motion) {
-            if (!motion) {
-                c.drawBitmapMesh(art,COLS,ROWS,rest,0,null,0,p);
-                return;
-            }
-            double phase=clock*(2*Math.PI/(index==0?4960:index==1?5780:5250))+index*1.7;
-            float breath=(float)Math.sin(phase), sway=(float)Math.sin(phase*.67+.55);
-            float finger=(float)Math.sin(phase*1.13-.35);
-            for (int k=0;k<COUNT;k++) {
-                mesh[k*2]=rest[k*2]+head[k]*.0043f*sway+body[k]*.0017f*sway+hand[k]*.0027f*finger;
-                mesh[k*2+1]=rest[k*2+1]+head[k]*.0034f*breath+body[k]*.0028f*breath-hand[k]*.0011f*breath;
-            }
-            c.drawBitmapMesh(art,COLS,ROWS,mesh,0,null,0,p);
-        }
-    }
 }

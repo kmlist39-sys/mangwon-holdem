@@ -12,8 +12,8 @@ final class RebuyEntrance {
     private final Arena a;
     private final Bitmap ticket;
     private final ArrayDeque<JSONObject> queue=new ArrayDeque<>();
-    private final int[] pendingHand=new int[50];
-    private final long[] seatAt=new long[50];
+    private final int[] pendingHand=new int[CastArt.COUNT];
+    private final long[] seatAt=new long[CastArt.COUNT];
     private long shownAt;
     private JSONObject shown;
     RebuyEntrance(StageArt stage){this.stage=stage;a=stage.a;ticket=a.image("rebuy-ticket.png");Arrays.fill(pendingHand,-1);}
@@ -68,7 +68,7 @@ final class RebuyEntrance {
         if(ticket!=null)a.photo(ticket,x,y,x+262,y+64);else stage.plate(x,y,x+262,y+64,0);
         float center=x+133;
         boolean rebought="rebought".equals(shown.optString("kind"));
-        String info=rebought?"리바인 "+shown.optInt("count",1)+"회 · +50,000칩":"핸드 "+shown.optInt("hand");
+        String info=rebought?"리바인 "+shown.optInt("count",1)+"회 · +"+a.fmt(shown.optInt("stack",50000))+"칩":"핸드 "+shown.optInt("hand");
         stage.bet.fitted(shown.optInt("table")+"번 테이블  ·  "+info,center,y+24,178,12,a.gold,android.graphics.Paint.Align.CENTER);
         stage.bet.fitted(shown.optString("name")+" 님, "+(rebought?"리바인하셨습니다.":"탈락하셨습니다."),center,y+47,179,16,a.paper,android.graphics.Paint.Align.CENTER);
         a.c.restore();a.c.restore();

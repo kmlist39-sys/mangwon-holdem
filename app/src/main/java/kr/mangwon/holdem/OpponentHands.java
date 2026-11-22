@@ -11,7 +11,7 @@ final class OpponentHands {
     private static final int[] CHIP_FORWARD={0,5,2,-2,12,7,11,-3,6,16,21,18};
     private final StageArt stage;
     private final Arena arena;
-    private final Motion[] moves=new Motion[50];
+    private final Motion[] moves=new Motion[CastArt.COUNT];
     private int lastEvent=-1;
 
     private static final class Motion {

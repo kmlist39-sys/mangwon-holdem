@@ -58,6 +58,7 @@ final class Cashier {
         a.photo(rack,106,47,974,377);
         a.grad(106,35,974,171,0xf319201a,0x0019201a,true);
         a.text("포인트 충전",137,79,28,a.paper,a.title,Paint.Align.LEFT);
+        a.brass("GTO 구매하기",557,48,155,"gtoStore");
         a.txt("내 지갑   "+a.fmt(a.snapshot.optLong("wallet"))+" P",139,109,16,a.paper);
         if(a.host.rewardAds.privacyRequired())a.brass("광고 개인정보",730,48,128,"adPrivacy");
         a.grad(106,322,974,379,0x001b231d,0xff1b231d,true);

@@ -7,13 +7,13 @@ import java.util.Locale;
 
 /** Shared atlas rendering, action choreography and public tournament display. */
 final class StageArt {
-    final Arena a;final BetArt bet; final TitleSequence title; final RectF dst=new RectF(); final Rect srcRect=new Rect(); final long[] badgeTime=new long[50];
+    final Arena a;final BetArt bet; final TitleSequence title; final RectF dst=new RectF(); final Rect srcRect=new Rect(); final long[] badgeTime=new long[CastArt.COUNT];
     final Bitmap buttons, trim, showdown, hands, props, bartender;
     final VenueScene place;final ChipMotion chips;final RebuyEntrance rebuys;
     final OpponentHands opponents;
     long accepted, gestureAt, revealAt;
     private long titleElapsed, lastTitleFrame;
-    final int[] tableOrder=new int[4];
+    int[] tableOrder=new int[4];
     int tableCount, tablePage, heroTable;
     int gesture=-1, serial=-1, hand=-1, shown=-1;
     StageArt(Arena arena){
@@ -72,8 +72,8 @@ final class StageArt {
     void ambience(){
         boolean table=a.screen.equals("table")||a.panel.equals("entry");
         if(!table)return;
-        long t=a.now-a.born;int venue=place.venue();
-        if(venue!=0){place.draw(venue,t);return;}
+        long t=a.now-a.born;int scene=place.sceneId();
+        if(scene!=VenueScene.NIGHT){place.draw(scene,t);return;}
         // The back counter in the 1080 x 520 room painting runs through y=93.
         // Hide the apron behind its lip, and plant the saucer on its upper face.
         int beat=(int)(t/230%POLISHING.length);
@@ -128,7 +128,8 @@ final class StageArt {
     }
     JSONArray tablesData(){return a.g==null?null:a.g.optJSONArray("tables");}
     void orderTables(JSONArray tables){
-        tableCount=tables==null?0:Math.min(tables.length(),tableOrder.length);
+        tableCount=tables==null?0:tables.length();
+        if(tableOrder.length<tableCount)tableOrder=new int[tableCount];
         heroTable=0;
         for(int i=0;i<tableCount;i++){
             JSONObject t=tables.optJSONObject(i);
@@ -183,8 +184,10 @@ final class StageArt {
         if(rebuys.ticket()){a.hit(13,372,275,436,"tables");return;}
         plate(13,372,275,436,0);
         a.c.save();a.c.clipRect(42,383,246,426);
-        for(int slot=0;slot<tableCount;slot++){
-            int index=tableOrder[slot];JSONObject t=ts.optJSONObject(index);
+        int pages=Math.max(1,(tableCount+3)/4);
+        int start=pages==1?0:4*(int)((a.now/6000)%pages);
+        for(int slot=0;slot<4&&start+slot<tableCount;slot++){
+            int index=tableOrder[start+slot];JSONObject t=ts.optJSONObject(index);
             int number=t.optInt("number",index+1),incoming=t.optInt("incoming");
             String count=t.optInt("seats")+(incoming>0?"+"+incoming:"")+"명";
             if(tableCount>2){

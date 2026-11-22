@@ -9,7 +9,7 @@ final class ExitPanel {
     static void pause(Arena a) {
         a.mid("핸드와 블라인드 시계가 멈췄습니다.",540,140,19,a.paper);
         a.key("계속 플레이",345,159,390,50,"close",1);
-        a.key("저장하고 로비로",345,220,390,45,"lobby",0);
+        a.key("자리 보관하고 로비로",345,220,390,45,"parkVenue",0);
         a.key("게임 설정",345,276,390,43,"settings",0);
         if(a.g==null)return;
         JSONObject q=a.g.optJSONObject("exitQuote");

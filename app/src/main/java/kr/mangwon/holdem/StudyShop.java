@@ -1,0 +1,36 @@
+package kr.mangwon.holdem;
+
+import android.graphics.Paint;
+
+final class StudyShop {
+    private StudyShop() {}
+
+    static void draw(Arena a) {
+        StudyBilling billing = a.host.studyBilling;
+        a.hits.clear();
+        a.box(0,0,1080,520,0,0xba0d1511);
+        a.box(153,33,927,487,14,0xff1b2c25);
+        a.stroke(153,33,927,487,14,0xffa38c62,1.3f);
+        a.text("홀덤 공부",190,100,41,a.paper,a.title,Paint.Align.LEFT);
+        a.brass("닫기",831,54,62,"close");
+        a.line(191,121,892,121,0xff786849,1);
+        a.card(50,217,168,74,108,-13,false);
+        a.card(51,274,161,74,108,10,false);
+        a.text("GTO 핸드 복기",396,182,28,a.paper,a.title,Paint.Align.LEFT);
+        a.txt("내가 판단한 순간의 패와 보드를 다시 펼쳐 보세요.",396,219,16,a.paper);
+        a.txt("팟 오즈, 상대 범위와 내 선택의 근거를 살펴봅니다.",396,246,16,a.paper);
+        a.txt(billing.displayPrice(),396,281,21,a.gold);
+        a.line(191,307,892,307,0xff716447,1);
+        a.txt(billing.status(),198,337,15,a.paper);
+        a.txt("매월 자동 갱신됩니다. 취소는 Google Play 구독 관리에서 할 수 있습니다.",198,365,13,a.muted);
+        a.key("무료 예시",192,390,173,51,"gtoSample",0);
+        a.key("구독 확인",374,390,148,51,"gtoRefresh",0);
+        if (billing.unlocked()) a.key("내 핸드 복기",539,390,348,51,"gtoReview",1);
+        else if (billing.canBuy()) a.key("GTO 구매하기",539,390,348,51,"gtoPurchase",1);
+        else {
+            a.box(540,395,884,437,7,0xff2e3e35);
+            a.mid("GTO 구매하기",711,422,17,a.muted);
+        }
+        a.brass("Google Play 구독 관리",658,448,227,"gtoManage");
+    }
+}

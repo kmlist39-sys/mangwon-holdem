@@ -52,6 +52,10 @@ final class DealerVoice {
     }
     void observe(JSONObject snapshot){
         JSONObject game=snapshot.optJSONObject("g"),opts=snapshot.optJSONObject("opt");
+        String switched=snapshot.optString("venueChange");
+        if("parked".equals(switched)||"resumed".equals(switched)){
+            stop();observed=false;seenHand=-1;seenAction=-1;titleHand=-1;settlementId="";
+        }
         boolean voiceOn=activity.active&&opts!=null&&opts.optBoolean("voice",true);
         JSONArray events=snapshot.optJSONArray("tournamentEvents");
         if(game==null){

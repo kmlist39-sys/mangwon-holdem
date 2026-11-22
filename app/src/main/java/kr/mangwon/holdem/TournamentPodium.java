@@ -63,7 +63,7 @@ final class TournamentPodium {
         moving=justFinished&&ValueAnimator.areAnimatorsEnabled();
         began=SystemClock.uptimeMillis();
         if(trophies==null)trophies=a.image("podium-trophies.webp");
-        room=pub==0?a.table:a.stage.place.venue()==pub?a.stage.place.backdrop():a.image("seongsan-room.jpg");
+        room=a.stage.place.backdrop(VenueScene.roomFor(pub,outcome.optInt("initial",18)));
     }
 
     boolean showing(){return result!=null&&a.panel.equals("result");}

@@ -20,11 +20,11 @@ final class CharacterProfile {
     private static final float[] SOURCE_Y={.12f,.27f,.31f,.70f,.74f,.88f};
     private static final float[] FRAME_X={66,113,967,1014};
     private static final float[] FRAME_Y={15,43,224,296,477,505};
-    private static final String[] TIERS={"일반","상급","최상급"};
+    private static final String[] TIERS={"준프로","프로","탑티어"};
 
     CharacterProfile(Arena arena){
         a=arena;
-        stories=new JSONObject[a.artMap.length];
+        stories=new JSONObject[CastArt.COUNT];
         try{
             JSONArray data=new JSONArray(new String(a.host.bytes("characters.json"),"UTF-8"));
             for(int i=0;i<data.length();i++){
@@ -49,8 +49,8 @@ final class CharacterProfile {
         JSONObject story=stories[id];
         String name=person.optString("name");
         String job=person.optString("job");
-        String alias=story==null?"":story.optString("alias");
-        String line=story==null?"":story.optString("line");
+        String alias=story==null?person.optString("alias"):story.optString("alias");
+        String line=story==null?person.optString("line"):story.optString("line");
         int pub=Math.max(0,Math.min(a.pubs.length-1,person.optInt("pub")));
         int tier=Math.max(0,Math.min(2,person.optInt("tier")));
         String skill=person.optString("skill",TIERS[tier]);
@@ -80,9 +80,10 @@ final class CharacterProfile {
 
         a.text("플레이 성향",410,222,16,a.gold,a.bold,Paint.Align.LEFT);
         a.wrapped(person.optString("style"),410,250,545,18,a.paper,2);
-        if(story!=null){
+        String tell=story==null?person.optString("tell"):story.optString("tell");
+        if(!tell.isEmpty()){
             a.text("테이블 버릇",410,306,16,a.gold,a.bold,Paint.Align.LEFT);
-            a.wrapped(story.optString("tell"),410,334,545,17,a.paper,2);
+            a.wrapped(tell,410,334,545,17,a.paper,2);
         }
         a.line(409,383,963,383,0xff796947,1);
         JSONObject history=person.optJSONObject("history");
@@ -106,7 +107,7 @@ final class CharacterProfile {
         }
     }
 
-    private void frame(){
+    void frame(){
         Bitmap plaque=a.stage.bet.plaque;
         if(plaque==null){a.box(69,21,1011,499,15,0xff193328);return;}
         a.reset(-1);

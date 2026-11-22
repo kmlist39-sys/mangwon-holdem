@@ -24,10 +24,10 @@ final class SeatActing {
     private Bitmap regrets,thoughts;
     private volatile boolean expressionsReady;
     private boolean loading;
-    private final Portrait[] cast=new Portrait[50];
-    private final boolean[] seated=new boolean[50];
-    private final int[] action=new int[50];
-    private final long[] acted=new long[50];
+    private final Portrait[] cast=new Portrait[CastArt.COUNT];
+    private final boolean[] seated=new boolean[CastArt.COUNT];
+    private final int[] action=new int[CastArt.COUNT];
+    private final long[] acted=new long[CastArt.COUNT];
     private final Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
     private static final PorterDuffXfermode ADD=new PorterDuffXfermode(PorterDuff.Mode.ADD);
     private int lastSeq=-1;
@@ -72,9 +72,10 @@ final class SeatActing {
             }
             for(int id=0;id<cast.length;id++){
                 if(!seated[id])cast[id]=null;
-                else if(cast[id]==null&&a.busts!=null){
-                    int cell=a.artMap[id];
-                    cast[id]=new Portrait(cell,cut(a.busts,cell));
+                else if(cast[id]==null){
+                    int cell=id<CastArt.ORIGINAL?a.artMap[id]:-1;
+                    Bitmap bitmap=cell<0?a.castArt.portrait(id):cut(a.busts,cell);
+                    if(bitmap!=null)cast[id]=new Portrait(cell,bitmap);
                 }
                 if(cast[id]!=null)cast[id].resetFocus();
             }
@@ -131,7 +132,7 @@ final class SeatActing {
         float think=person.focus(active&&!folded&&expressionsReady,paying,a.now,motion);
         float seatDepth=Arena.frontWing(x)?1:Arena.endSeat(x)?.74f:Math.min(.46f,Math.abs(x-540)/680);
         int inward=x<540?1:-1;
-        boolean flipped=seatDepth>.55f&&FACING[person.cell]!=inward;
+        boolean flipped=seatDepth>.55f&&person.facing!=inward;
         int localInward=flipped?-inward:inward;
         float cycle=3340+id*383%1975;
         double wave=(a.now-a.born+id*347)%((long)cycle)*(2*Math.PI/cycle);
@@ -190,7 +191,7 @@ final class SeatActing {
         static {for(int y=0;y<=ROWS;y++)for(int x=0;x<=COLS;x++){
             int k=y*(COLS+1)+x;U[k]=x/(float)COLS;V[k]=y/(float)ROWS;
         }}
-        final int cell;
+        final int cell,facing;
         final Bitmap idle;
         Bitmap fold,think;
         private boolean foldChecked,thinkChecked;
@@ -202,7 +203,7 @@ final class SeatActing {
             wrists=new float[N],elbows=new float[N],brows=new float[N],mouths=new float[N],yaw=new float[N];
 
         Portrait(int frame,Bitmap neutral){
-            cell=frame;idle=neutral;
+            cell=frame;facing=frame<0?1:FACING[frame];idle=neutral;
             // Skin centroid anchors the rig to each haircut and face, including the older cast.
             int count=0;float tx=0,ty=0;
             for(int iy=3;iy<=11;iy++)for(int ix=4;ix<=16;ix++){
@@ -217,8 +218,8 @@ final class SeatActing {
                 float u=U[k],v=V[k],pinned=1-ease(v,.78f,1);
                 heads[k]=bell(u,v,cx,cy,.39f,.42f)*pinned;
                 shoulders[k]=bell(u,v,.50f,.70f,.57f,.28f)*pinned;
-                wrists[k]=bell(u,v,.50f+FACING[cell]*.095f,.82f,.30f,.20f)*(1-ease(v,.90f,1));
-                elbows[k]=bell(u,v,.50f-FACING[cell]*.14f,.77f,.26f,.18f)*(1-ease(v,.88f,1));
+                wrists[k]=bell(u,v,.50f+facing*.095f,.82f,.30f,.20f)*(1-ease(v,.90f,1));
+                elbows[k]=bell(u,v,.50f-facing*.14f,.77f,.26f,.18f)*(1-ease(v,.88f,1));
                 brows[k]=bell(u,v,cx,cy-.047f,.19f,.12f)*pinned;
                 mouths[k]=bell(u,v,cx,cy+.099f,.16f,.097f)*pinned;
                 yaw[k]=(u-.5f)*shoulders[k];
@@ -243,14 +244,14 @@ final class SeatActing {
         }
 
         void prepareFold(Bitmap sheet){
-            if(foldChecked)return;
+            if(foldChecked||cell<0)return;
             foldChecked=true;
             Bitmap b=cut(sheet,cell);
             fold=hasInk(b)?b:null;
         }
 
         void prepareThought(Bitmap sheet){
-            if(thinkChecked)return;
+            if(thinkChecked||cell<0)return;
             thinkChecked=true;
             Bitmap b=cut(sheet,cell);
             think=hasInk(b)?b:null;

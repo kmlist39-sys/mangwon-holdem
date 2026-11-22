@@ -24,7 +24,7 @@ final class GeminiBank {
         try{
             recipes=new JSONObject(new String(activity.bytes("dealer-phrases.json"),StandardCharsets.UTF_8));
             JSONObject wins=new JSONObject(new String(activity.bytes("dealer-win-phrases.json"),StandardCharsets.UTF_8));
-            boolean fullVocabulary=recipes.length()==710&&wins.length()==326;
+            boolean fullVocabulary=recipes.length()>=710&&wins.length()>=326;
             for(java.util.Iterator<String> i=wins.keys();i.hasNext();){String key=i.next();recipes.put(key,wins.getJSONArray(key));}
             JSONObject origin=new JSONObject(new String(activity.bytes("dealer-voice/source.json"),StandardCharsets.UTF_8));
             JSONObject index=new JSONObject(new String(activity.bytes("dealer-voice/index.json"),StandardCharsets.UTF_8));
@@ -71,15 +71,34 @@ final class GeminiBank {
         if(line==null)return out;
         String full="line:"+line.text;
         if(has(full)){out.add(full);return out;}
+        List<String> parts=new ArrayList<>();
         for(String key:line.clips){
-            if(has(key)){out.add(key);continue;}
-            JSONArray parts=recipes==null?null:recipes.optJSONArray(key);
-            if(parts==null||parts.length()==0){out.clear();return out;}
-            for(int i=0;i<parts.length();i++){
-                String part=parts.optString(i);
-                if(!has(part)){out.clear();return out;}
-                out.add(part);
+            if(key.startsWith("name:")){parts.add(key);continue;}
+            if(has(key)){parts.add(key);continue;}
+            JSONArray recipe=recipes==null?null:recipes.optJSONArray(key);
+            String name="";
+            if(recipe==null&&key.startsWith("result:")){
+                int sep=key.indexOf(':',7);
+                if(sep>0&&recipes!=null){
+                    name=key.substring(sep+1);
+                    recipe=recipes.optJSONArray(key.substring(0,sep+1)+"플레이어");
+                }
             }
+            if(recipe==null||recipe.length()==0)return out;
+            for(int i=0;i<recipe.length();i++){
+                String part=recipe.optString(i);
+                parts.add(!name.isEmpty()&&part.equals("name:플레이어")?"name:"+name:part);
+            }
+        }
+        for(int i=0;i<parts.size();i++){
+            String key=parts.get(i);
+            // Preserve the verified hand, result and board audio while an entrant's
+            // proper name is unavailable. Never substitute another player's voice clip.
+            if(key.startsWith("name:")&&!has(key))continue;
+            if(key.equals("board:and")&&((i>0&&parts.get(i-1).startsWith("name:")&&!has(parts.get(i-1)))
+                ||(i+1<parts.size()&&parts.get(i+1).startsWith("name:")&&!has(parts.get(i+1)))))continue;
+            if(has(key)){out.add(key);continue;}
+            out.clear();return out;
         }
         return out;
     }

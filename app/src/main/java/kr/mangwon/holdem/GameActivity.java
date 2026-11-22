@@ -20,6 +20,7 @@ public final class GameActivity extends Activity {
     SoundPool sounds; final Map<String,Integer> soundIds=new HashMap<>(),lengths=new HashMap<>();
     final Set<Integer> ready=new HashSet<>(); long talkingUntil; DealerVoice dealerVoice;
     PubMusic music; RewardAdDesk rewardAds; DailyInterstitial dailyAd;
+    StudyBilling studyBilling;
     private String offeredAd="",closedAd="",resumingAd="";
     private static boolean openedInProcess;
     boolean musicEnabled; String rewardNoticeOnReturn;
@@ -28,6 +29,7 @@ public final class GameActivity extends Activity {
     void immersive(){getWindow().getDecorView().setSystemUiVisibility(5894);getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);}
     @Override public void onCreate(Bundle b){super.onCreate(b);immersive();setVolumeControlStream(AudioManager.STREAM_MUSIC);
         musicEnabled=getPreferences(0).getBoolean("pubMusic",true);music=new PubMusic(this);music.setEnabled(musicEnabled);
+        studyBilling=new StudyBilling(this);
         arena=new Arena(this);arena.intro.prepare(b==null&&!openedInProcess);openedInProcess=true;dealerVoice=new DealerVoice(this);rewardAds=new RewardAdDesk(this);dailyAd=new DailyInterstitial(this);setContentView(arena);
         if(Build.VERSION.SDK_INT>=33)getOnBackInvokedDispatcher().registerOnBackInvokedCallback(android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,()->{if(!arena.back())finish();});
         thread=new HandlerThread("PokerRules");thread.start();worker=new Handler(thread.getLooper());
@@ -83,18 +85,33 @@ public final class GameActivity extends Activity {
     void command(String op,Object... values){
         JSONObject j=args(values);try{j.put("op",op);
             if(op.equals("step")||op.equals("next")||op.equals("re")||op.equals("skip"))j.put("voiceBusy",dealerVoice.busy());
+            if(arena.g!=null&&!j.has("session")&&(op.equals("step")||op.equals("next")||op.equals("re")||
+                    op.equals("skip")||op.equals("leave")||op.equals("peek")))j.put("session",arena.g.optString("sessionId"));
         }catch(JSONException e){return;}
         boolean tick=op.equals("step");if(tick)pending=true;
         worker.post(()->{
             try{
+                boolean changesVenue=op.equals("parkVenue")||op.equals("resumeVenue")||op.equals("enter");
+                String checkpoint=changesVenue?call("{\"op\":\"save\"}"):null;
                 JSONObject state=new JSONObject(call(j.toString()));
                 long now=SystemClock.uptimeMillis();
                 JSONObject game=state.optJSONObject("g"),gate=game==null?null:game.optJSONObject("levelAd");
                 if(!tick||gate!=null||state.optBoolean("preFoldConsumed")||state.optBoolean("finalTableStarted")||state.optBoolean("headsUpStarted")||state.optBoolean("tournamentFinished")||cashWaitsForInput(game,state.optJSONObject("opt"))||now-lastSave>=2500){
-                    if(!persist()&&gate!=null)gate.put("skip",true);
+                    if(!persist()){
+                        if(changesVenue){
+                            android.content.SharedPreferences prefs=getPreferences(0);
+                            prefs.edit().putString("session",checkpoint).apply();
+                            JSONObject before=new JSONObject(call(args("op","init","data",checkpoint,
+                                "completedAds",prefs.getLong("completedAds",0),"levelAds",dailyAd.enabled()).toString()));
+                            before.put("venueChange",op.equals("parkVenue")?"parkFailed":"denied");
+                            before.put("notice","자리를 저장하지 못했습니다. 다시 시도해 주세요.");
+                            ui.post(()->{if(!isDestroyed())present(before);});return;
+                        }
+                        if(gate!=null)gate.put("skip",true);
+                    }
                     lastSave=now;
                 }
-                JSONArray roster=op.equals("next")||op.equals("enter")?new JSONArray(call("{\"op\":\"roster\"}")):null;
+                JSONArray roster=op.equals("next")||op.equals("enter")||op.equals("resumeVenue")?new JSONArray(call("{\"op\":\"roster\"}")):null;
                 ui.post(()->{
                     if(isDestroyed())return;
                     if(roster!=null)arena.people=roster;
@@ -146,8 +163,8 @@ public final class GameActivity extends Activity {
             lastTick=now;return;
         }
         if(!pending&&now-lastTick>=180){
-            double dt=Math.min(.7,(now-lastTick)/1000.0);lastTick=now;
-            command("step","dt",dt,"inspect",arena.panel.equals("tables"),"holdTable",arena.deal.running()||arena.panel.equals("wagers")||arena.panel.equals("receipt")||arena.panel.equals("profile")||now<talkingUntil);
+            double clockDt=(now-lastTick)/1000.0;lastTick=now;
+            command("step","dt",Math.min(.7,clockDt),"clockDt",clockDt,"inspect",arena.panel.equals("tables"),"holdTable",arena.deal.running()||arena.panel.equals("wagers")||arena.panel.equals("receipt")||arena.panel.equals("profile")||now<talkingUntil);
         }
     }
     void fx(String key,float volume){Integer id=soundIds.get(key);if(id!=null&&ready.contains(id)&&active)sounds.play(id,volume,volume,1,0,1f);}
@@ -161,10 +178,10 @@ public final class GameActivity extends Activity {
         musicEnabled=!musicEnabled;music.setEnabled(musicEnabled);
         getPreferences(0).edit().putBoolean("pubMusic",musicEnabled).apply();arena.invalidate();
     }
-    @Override protected void onResume(){super.onResume();active=true;immersive();music.setActive(dailyAd==null||!dailyAd.showing());lastTick=SystemClock.uptimeMillis();if(arena!=null){if(rewardNoticeOnReturn!=null){arena.note(rewardNoticeOnReturn);rewardNoticeOnReturn=null;}arena.invalidate();}}
+    @Override protected void onResume(){super.onResume();active=true;immersive();studyBilling.refresh();music.setActive(dailyAd==null||!dailyAd.showing());lastTick=SystemClock.uptimeMillis();if(arena!=null){if(rewardNoticeOnReturn!=null){arena.note(rewardNoticeOnReturn);rewardNoticeOnReturn=null;}arena.invalidate();}}
     @Override protected void onPause(){arena.intro.pause();active=false;music.setActive(false);dealerVoice.stop();talkingUntil=0;if(worker!=null)worker.post(this::persist);super.onPause();}
     @Override protected void onUserLeaveHint(){rewardAds.leave();super.onUserLeaveHint();}
-    @Override protected void onDestroy(){worker.post(()->thread.quitSafely());ui.removeCallbacksAndMessages(null);dealerVoice.release();music.release();sounds.release();super.onDestroy();}
+    @Override protected void onDestroy(){studyBilling.close();worker.post(()->thread.quitSafely());ui.removeCallbacksAndMessages(null);dealerVoice.release();music.release();sounds.release();super.onDestroy();}
     @Override public void onWindowFocusChanged(boolean b){super.onWindowFocusChanged(b);if(b)immersive();}
     @Override public void onBackPressed(){if(!arena.back())super.onBackPressed();}
 }

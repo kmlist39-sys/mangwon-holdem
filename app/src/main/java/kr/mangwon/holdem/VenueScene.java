@@ -1,6 +1,7 @@
 package kr.mangwon.holdem;
 
 import android.graphics.Bitmap;
+import android.graphics.LinearGradient;
 import android.graphics.Path;
 import android.graphics.RadialGradient;
 import android.graphics.Rect;
@@ -9,6 +10,7 @@ import android.graphics.Shader;
 
 /** Motion remains inside the back wall of each painted room. */
 final class VenueScene {
+    static final int NIGHT=0,SUNSET=1,RIVER=2,HALL=3;
     private final Arena a;
     private int cached=-1;
     private Bitmap room, moving;
@@ -20,16 +22,35 @@ final class VenueScene {
     private final Rect rotorSource=new Rect();
     private final RectF rotorDestination=new RectF();
     private final RadialGradient glow=new RadialGradient(0,0,1,0xc7ffd684,0x00ffad52,Shader.TileMode.CLAMP);
+    private final Path[] stageLights={new Path(),new Path()};
+    private final LinearGradient beam=new LinearGradient(0,27,0,133,
+        new int[]{0x06fbe8bd,0x19ebd3ad,0x0ce8bd87,0x00e6bd87},new float[]{0,.26f,.76f,1},Shader.TileMode.CLAMP);
     private float left,top,right,bottom;
 
-    VenueScene(Arena a){this.a=a;fan.addCircle(632,42,13,Path.Direction.CW);}
-    int venue(){return a.screen.equals("table")&&a.g!=null?a.g.optInt("pub"):a.venue;}
-    Bitmap backdrop(){
-        int venue=venue();if(venue==0)return a.table;
+    VenueScene(Arena a){
+        this.a=a;fan.addCircle(632,42,13,Path.Direction.CW);
+        for(int i=0;i<2;i++){
+            float source=i==0?445:635,target=i==0?512:570;
+            Path light=stageLights[i];light.moveTo(source-1,27);light.lineTo(source+1,27);
+            light.lineTo(target+27,133);light.lineTo(target-27,133);light.close();
+        }
+    }
+    static int roomFor(int pub,int entrants){
+        if(pub==0)return entrants>=27?SUNSET:NIGHT;
+        return pub==1?HALL:RIVER;
+    }
+    int sceneId(){
+        if(a.screen.equals("table")&&a.g!=null&&!a.panel.equals("entry"))
+            return roomFor(a.g.optInt("pub"),a.g.optInt("entrants"));
+        return roomFor(a.venue,a.selectedTournamentTables()*9);
+    }
+    Bitmap backdrop(){return backdrop(sceneId());}
+    Bitmap backdrop(int venue){
+        if(venue==NIGHT)return a.table;
         if(venue!=cached){
-            cached=venue;room=a.image(venue==1?"seongsan-room.jpg":"dangsan-room.jpg");
+            cached=venue;room=a.image(venue==SUNSET?"seongsan-room.jpg":venue==HALL?"mapo-room.jpg":"dangsan-room.jpg");
             moving=null;window.reset();
-            if(room!=null){
+            if(room!=null&&venue!=HALL){
                 left=venue==1?108:138;top=venue==1?0:108;
                 right=venue==1?559:857;bottom=venue==1?107:151;
                 int l=Math.round(left*room.getWidth()/1080),t=Math.round(top*room.getHeight()/520);
@@ -71,6 +92,10 @@ final class VenueScene {
         }
     }
     void draw(int venue,long elapsed){
+        if(venue==HALL){
+            if(cached==HALL&&room!=null)hallLights((elapsed%240000)/1000f);
+            return;
+        }
         if(moving==null||cached!=venue)return;
         float t=(elapsed%120000)/1000f;
         double x=t*(venue==1?1.24:1.62),y=t*(venue==1?1.32:2.03);
@@ -96,6 +121,23 @@ final class VenueScene {
         a.c.save();a.c.translate(cx,cy);a.c.scale(venue==1?59:33,venue==1?36:48);
         a.reset(-1);a.p.setShader(glow);a.p.setAlpha((int)(26+9*Math.sin(t*1.27)+5*Math.sin(t*2.43)));
         a.c.drawCircle(0,0,1,a.p);a.c.restore();
+    }
+    private void hallLights(float time){
+        // Truss and pendant positions are measured in the painted venue. Keep
+        // every light on the back wall above the playing rail.
+        a.c.save();a.c.clipRect(0,0,1080,145);
+        for(int i=0;i<stageLights.length;i++){
+            a.c.save();a.c.rotate((float)Math.sin(time*.27+i*2.7)*1.65f,i==0?445:635,27);
+            a.reset(-1);a.p.setShader(beam);a.c.drawPath(stageLights[i],a.p);a.c.restore();
+        }
+        for(int i=0;i<3;i++){
+            float x=i==0?137:i==1?944:542,y=i==2?122:54;
+            a.c.save();a.c.translate(x,y);a.c.scale(i==2?75:46,i==2?12:32);
+            a.reset(-1);a.p.setShader(glow);
+            a.p.setAlpha((int)(27+5*Math.sin(time*.53+i*1.7)));
+            a.c.drawCircle(0,0,1,a.p);a.c.restore();
+        }
+        a.c.restore();
     }
     private void traffic(float t){
         for(int k=0;k<5;k++){
