@@ -53,7 +53,8 @@ final class PubMenu {
     private final Matrix foilPosition = new Matrix();
     private LinearGradient headerShade;
     private float left, right, top, bottom, span;
-    private int width, height, lastWallet = -1;
+    private int width, height;
+    private long lastWallet = -1;
     private String wallet = "";
     final VenueArrival arrival;
     private long clock, lastFrame, lastMotionCheck, entered;
@@ -143,10 +144,8 @@ final class PubMenu {
         Bitmap art = portraits[i];
         float sw = art.getWidth(), sh = art.getHeight();
         double phase = clock*(2*Math.PI/(i==1 ? 10900 : i==2 ? 13700 : 12100)) + i*1.7;
-        // Overscan gives the slow camera a few pixels to travel with no exposed edges.
-        float breathe = motion ? (float)Math.sin(phase) : 0;
-        float scale = Math.max((r-l)/sw,(bottom-top)/sh) * (1.025f+.005f*breathe+.018f*presses[i]);
-        float x = (l+r-scale*sw)*.5f+2.4f*breathe;
+        float scale = Math.max((r-l)/sw,(bottom-top)/sh) * 1.026f;
+        float x = (l+r-scale*sw)*.5f;
         float y = (top+bottom-scale*sh)*.5f;
         Canvas c = a.c;
         c.save(); c.translate(x,y); c.scale(scale*sw,scale*sh);
@@ -256,7 +255,7 @@ final class PubMenu {
 
     private void headerButtons() {
         float y=top+29, settings=right-28, divider=right-102, walletRight=right-121;
-        int funds=a.snapshot.optInt("wallet",50000);
+        long funds=a.snapshot.optLong("wallet",50000);
         if (funds!=lastWallet) { wallet=a.fmt(funds)+" P"; lastWallet=funds; }
         letters.setTextSize(19); letters.setTypeface(a.nums);
         float walletWidth=letters.measureText(wallet);
@@ -264,7 +263,7 @@ final class PubMenu {
         boolean music=a.host.musicEnabled;
         int muted=music ? 0xffe0d9c3 : 0xffaba99d;
         float soundX=walletLeft-104;
-        a.brass("GTO 구매하기",soundX-129,y-15,118,"gtoStore");
+        a.brass(a.host.studyBilling.storeLabel(),soundX-129,y-15,118,"gtoStore");
         paint.setStrokeCap(Paint.Cap.ROUND);
         a.line(soundX+8,y+4,soundX+8,y-8,muted,1.8f);
         a.line(soundX+8,y-8,soundX+14,y-6,muted,2);

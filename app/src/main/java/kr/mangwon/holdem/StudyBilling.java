@@ -16,7 +16,7 @@ import java.security.spec.X509EncodedKeySpec;
 import java.util.Collections;
 import java.util.List;
 
-/** Subscription access is derived from Play's active purchases, never from the game save. */
+/** Release access comes from Play receipts. The debug APK includes a clearly labelled study preview. */
 final class StudyBilling {
     static final String PRODUCT = "gto_study_monthly";
     static final String BASE_PLAN = "monthly";
@@ -32,7 +32,9 @@ final class StudyBilling {
     StudyBilling(GameActivity host) {
         this.host = host;
         licenseKey = readKey(host.getString(R.string.play_licensing_key));
-        if (BuildConfig.DEBUG || !installedByPlay(host)) {
+        if (BuildConfig.DEBUG) {
+            client = null;
+        } else if (!installedByPlay(host)) {
             client = null;
             message = "Google Play에서 설치한 버전에서 구독할 수 있습니다.";
         } else if (licenseKey == null) {
@@ -84,14 +86,16 @@ final class StudyBilling {
     }
 
     boolean unlocked() {
-        return checked && active && SystemClock.elapsedRealtime() - lastCheck < 300000;
+        return BuildConfig.DEBUG || (checked && active && SystemClock.elapsedRealtime() - lastCheck < 300000);
     }
+    String storeLabel() { return unlocked() ? "GTO 핸드 복기" : "GTO 구매하기"; }
     boolean canBuy() {
         return client != null && client.isReady() && checked && !checking && !active && !pending
             && !buying && product != null && !offerToken.isEmpty();
     }
     String displayPrice() { return price.isEmpty() ? "월 2,900원 · 한국 기준" : "월 " + price; }
     String status() {
+        if (BuildConfig.DEBUG) return "테스트 APK에서는 내가 플레이한 핸드를 무료로 복기할 수 있습니다.";
         if (pending) return "결제 대기 중 · Google Play 승인 후 이용할 수 있습니다.";
         if (unlocked()) return "홀덤 공부 구독을 이용 중입니다.";
         if (!message.isEmpty()) return message;

@@ -58,26 +58,17 @@ final class Cashier {
         a.photo(rack,106,47,974,377);
         a.grad(106,35,974,171,0xf319201a,0x0019201a,true);
         a.text("포인트 충전",137,79,28,a.paper,a.title,Paint.Align.LEFT);
-        a.brass("GTO 구매하기",557,48,155,"gtoStore");
+        a.brass(a.host.studyBilling.storeLabel(),557,48,155,"gtoStore");
         a.txt("내 지갑   "+a.fmt(a.snapshot.optLong("wallet"))+" P",139,109,16,a.paper);
         if(a.host.rewardAds.privacyRequired())a.brass("광고 개인정보",730,48,128,"adPrivacy");
         a.grad(106,322,974,379,0x001b231d,0xff1b231d,true);
         a.txt("모의 충전 · 실제 결제 0원",139,132,13,a.muted);
         JSONObject catalogue=catalogue();
         if(catalogue==null)return;
-        JSONObject reward=catalogue.optJSONObject("reward");
-        if(reward==null)return;
-        RewardAdDesk ads=a.host.rewardAds;
-        boolean eligible=a.snapshot.optBoolean("rewardEligible"), canWatch=ads.enabled()&&rewardEligible();
-        if(!eligible)a.box(123,169,325,324,6,0x80202620);
-        a.mid(a.shortP(reward.optInt("points"))+" P",224,365,25,eligible?a.paper:a.muted);
-        a.stage.plate(143,375,305,418,canWatch?1:0);
-        a.mid(!eligible?"잔액 조건":ads.button(),224,403,16,canWatch?a.ink:a.muted);
-        if(canWatch)a.hit(122,147,326,418,"rewardAd");
-        for(int i=0;i<3;i++){
+        for(int i=0;i<4;i++){
             JSONObject item=product(i);
             if(item==null)continue;
-            float x=122+(i+1)*211,w=204;
+            float x=122+i*211,w=204;
             String target="pack"+i;
             if(target.equals(a.held))a.box(x,336,x+w,418,6,0xff354237);
             a.mid(a.shortP(item.optInt("points"))+" P",x+w/2,365,25,a.paper);
@@ -85,14 +76,24 @@ final class Cashier {
             a.mid(a.fmt(item.optInt("price"))+"원",x+w/2,403,17,a.gold);
             a.hit(x,147,x+w,418,target);
         }
-        a.line(137,429,943,429,0xff6c6349,1);
-        a.txt("광고 보상  ·  지갑 "+a.shortP(reward.optInt("maxWallet"))+" P 이하에서 이용",139,458,15,a.gold);
-        a.text(eligible?ads.caption():"현재 잔액이 광고 보상 한도를 초과했습니다",940,458,15,a.muted,a.normal,Paint.Align.RIGHT);
+        JSONObject reward=catalogue.optJSONObject("reward");
+        if(reward==null)return;
+        RewardAdDesk ads=a.host.rewardAds;
+        boolean eligible=a.snapshot.optBoolean("rewardEligible");
+        boolean canWatch=eligible&&ads.enabled()&&rewardEligible();
+        String limit=a.shortP(reward.optInt("maxWallet"))+" P 이하";
+        a.line(137,428,943,428,0xff6c6349,1);
+        a.txt("광고 시청 보상   +"+a.shortP(reward.optInt("points"))+" P",139,451,17,a.gold);
+        a.txt("지갑 잔액 "+limit+"일 때 이용",139,472,14,a.muted);
+        if(eligible)a.text(ads.caption(),742,459,13,a.muted,a.normal,Paint.Align.RIGHT);
+        a.stage.plate(756,435,946,476,canWatch?1:0);
+        a.mid(eligible?ads.button():"잔액 조건 미충족",851,460,15,canWatch?a.ink:a.muted);
+        if(canWatch)a.hit(750,429,952,481,"rewardAd");
     }
     private void detail(){
         JSONObject item=product(selection);
         if(item==null)return;
-        int i=selection+1;
+        int i=selection;
         if(rack!=null){
             int w=rack.getWidth(),h=rack.getHeight();
             Rect src=new Rect(i*w/4,(int)(.31*h),(i+1)*w/4,(int)(.84*h));

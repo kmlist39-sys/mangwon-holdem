@@ -3,6 +3,8 @@ package kr.mangwon.holdem;
 import android.animation.ValueAnimator;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
+import android.graphics.LinearGradient;
+import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.PathMeasure;
@@ -16,9 +18,15 @@ import org.json.JSONObject;
 /** Tournament milestones share one input guard and a saved rules clock. */
 final class TournamentBanner {
     private static final int FINAL_TABLE_MS = 2720, HEADS_UP_MS = 2960;
+    private static final String[] BUBBLE_DISTANCE={"","1명 탈락 시 입상","2명 탈락 시 입상","3명 탈락 시 입상"};
     private final Arena arena;
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
     private final RectF titleBounds = new RectF();
+    private final Path bubblePlate = new Path();
+    private final Matrix glintPosition = new Matrix();
+    private final LinearGradient glint = new LinearGradient(-28,5,28,-5,
+            new int[]{0x00ebd2a1,0x10f1d79f,0x62ffe7ac,0x13f5db9b,0x00ebd2a1},
+            new float[]{0,.37f,.52f,.73f,1},Shader.TileMode.CLAMP);
     private final RadialGradient bloom = new RadialGradient(0, 0, 1,
             new int[]{0x9c9e7536, 0x394d572c, 0x0016241d},
             new float[]{0, .54f, 1}, Shader.TileMode.CLAMP);
@@ -40,7 +48,10 @@ final class TournamentBanner {
     };
     private final Path trace = new Path();
 
-    TournamentBanner(Arena arena) { this.arena = arena; finalLettering=new FinalTableLettering(arena); }
+    TournamentBanner(Arena arena) {
+        this.arena=arena;finalLettering=new FinalTableLettering(arena);
+        bubblePlate.addRoundRect(306,57,557,83,13,13,Path.Direction.CW);
+    }
 
     private static PathMeasure bolt(int... points) {
         Path path = new Path();
@@ -91,6 +102,31 @@ final class TournamentBanner {
     private static float ease(float t) {
         t = Math.min(1, Math.max(0, t));
         return t * t * (3 - 2 * t);
+    }
+
+    /** A quiet, persistent tournament rail. It neither captures touches nor alters the hand clock. */
+    void bubble(JSONObject tournament,long now){
+        if(tournament==null||!tournament.optBoolean("bubble"))return;
+        int distance=tournament.optInt("itmDistance");
+        if(distance<1||distance>=BUBBLE_DISTANCE.length)return;
+        boolean animated=ValueAnimator.areAnimatorsEnabled();
+        float phase=(now%3200L)/3200f;
+        float pulse=animated?(float)(.5-.5*Math.cos(phase*2*Math.PI)):.5f;
+        int amber=android.graphics.Color.rgb(237+(int)(18*pulse),180+(int)(46*pulse),102+(int)(54*pulse));
+        Canvas c=arena.c;
+        c.save();
+        c.scale(1+.018f*pulse,1+.026f*pulse,431.5f,70);
+        arena.stage.plate(297,55,566,85,0);
+        if(animated&&phase<.68f){
+            glintPosition.setTranslate(273+317*ease(phase/.68f),70);
+            glint.setLocalMatrix(glintPosition);
+            paint.setStyle(Paint.Style.FILL);paint.setColor(0xffffffff);paint.setShader(glint);
+            c.drawPath(bubblePlate,paint);paint.setShader(null);
+        }
+        arena.text("버블 구간",374,76,18,amber,arena.title,Paint.Align.CENTER);
+        arena.line(426,62,426,78,0xff87754e,1);
+        arena.text(BUBBLE_DISTANCE[distance],482,75,14,arena.paper,arena.bold,Paint.Align.CENTER);
+        c.restore();
     }
 
     void draw(Canvas canvas, long now) {

@@ -35,7 +35,8 @@ final class GtoStudy {
             a.brass("무료 예시",355,334,168,"gtoSample");
             a.brass("구독 보기",558,334,168,"gtoStore");return;
         }
-        JSONObject spot=sample?SAMPLE:a.g==null?a.snapshot.optJSONObject("study"):a.g.optJSONObject("study");
+        JSONObject spot=sample?SAMPLE:a.g==null?null:a.g.optJSONObject("study");
+        if(spot==null)spot=a.snapshot.optJSONObject("study");
         if(spot==null){
             a.mid("첫 결정이 여기에 기록됩니다",540,222,25,a.paper);
             a.mid("테이블에서 한 번 행동한 뒤 내 패와 팟을 다시 볼 수 있습니다.",540,267,17,a.muted);

@@ -284,10 +284,7 @@ public final class Arena extends View {
  p.setShader(hudBottom);c.drawRect(0,409,1080,520,p);p.setShader(null);
  int venueNow=g.optInt("pub");text(pubs[venueNow],22,28,22,paper,bold,Paint.Align.LEFT);
  JSONObject tournament=g.optJSONObject("tournament");
- if(tournament!=null&&tournament.optBoolean("bubble")){
-     stage.plate(10,31,198,60,0);
-     mid("버블 구간  ·  "+tournament.optInt("itmDistance")+"명 탈락 시 입상",104,50,12,gold);
- }else txt(g.optBoolean("cash")?(g.optBoolean("double")?"더블보드":"원보드"):"데일리  ·  바이인 "+shortP(g.optInt("buyin",50000))+"P  ·  "+g.optInt("left")+"명 생존",23,48,12,muted);
+ txt(g.optBoolean("cash")?(g.optBoolean("double")?"더블보드":"원보드"):"데일리  ·  바이인 "+shortP(g.optInt("buyin",50000))+"P  ·  "+g.optInt("left")+"명 생존",23,48,12,muted);
  float blindX=g.optBoolean("cash")?550:611;
  String blinds=g.optBoolean("cash")?cashBlindLabel():"LV. "+(g.optInt("level")+1)+"   "+fmt(g.optLong("sb"))+" / "+fmt(g.optLong("bb"));
  mid(blinds,blindX,23,Math.min(17,186f/Math.max(1,blinds.length())*1.6f),gold);
@@ -317,7 +314,7 @@ public final class Arena extends View {
  }
  else if(phase.equals("showdown")&&g.optInt("show")>0){stage.showdownRank(ps,feed);}else if(phase.equals("suspense")||phase.equals("board")||phase.equals("street")||phase.equals("showdown")){/* Leave the felt clear while the hand settles. */}
  else{JSONObject who=ps.optJSONObject(g.optInt("actor"));if(who!=null)stage.turnNotice(who.optString("name")+"의 차례",944,475,false);}
- wages.draw();stage.heroWagerHand();ChipLeaders.draw(this,false);blindTicker.draw(now);washMotion.drawCredit();
+ wages.draw();stage.heroWagerHand();ChipLeaders.draw(this,false);tournamentBanner.bubble(tournament,now);blindTicker.draw(now);washMotion.drawCredit();
  if(g.optBoolean("showdownTitle"))stage.showdownTitle();
  }
  void seat(JSONObject q,int idx,float x,float y,Path seatMask){

@@ -95,7 +95,7 @@ final class DealerVoice {
         if(events==null)return;
         for(int i=0;i<events.length();i++){
             JSONObject event=events.optJSONObject(i);
-            if(event==null)continue;
+            if(event==null||!event.optBoolean("voiceAllowed",true))continue;
             String name=event.optString("name"),kind=event.optString("kind");
             if(name.isEmpty()||!("eliminated".equals(kind)||"rebought".equals(kind)))continue;
             String words="eliminated".equals(kind)?"탈락하셨습니다.":"리바인하셨습니다.";

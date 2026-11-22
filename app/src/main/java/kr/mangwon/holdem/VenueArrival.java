@@ -21,6 +21,7 @@ final class VenueArrival {
     private Bitmap mark;
     private final Paint ink=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
     private final Paint edge=new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint mapoEdge=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
     private final RectF dst=new RectF();
     private final Path bolt=new Path(),fork=new Path();
     private final LinearGradient titleShadow=new LinearGradient(0,0,1,0,new int[]{0x00131a19,0xa015191a,0xf3111716},new float[]{0,.39f,1},Shader.TileMode.CLAMP);
@@ -33,6 +34,25 @@ final class VenueArrival {
         for(int i=0;i<percentages.length;i++)percentages[i]=i+"%";
         edge.setShader(new LinearGradient(0,0,1,0,new int[]{0xffffffff,0x00ffffff,0x00ffffff,0xffffffff},new float[]{0,.17f,.83f,1},Shader.TileMode.CLAMP));
         edge.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.DST_OUT));
+        // The host extends her hand to the left edge of the painting at table height.
+        // Keep the hand opaque while softening the joins in the wall and the felt.
+        int maskSize=128;
+        Bitmap matte=Bitmap.createBitmap(maskSize,maskSize,Bitmap.Config.ARGB_8888);
+        int[] pixels=new int[maskSize*maskSize];
+        for(int y=0;y<maskSize;y++){
+            float v=(y+.5f)/maskSize;
+            float handBand=ease((v-.23f)/.10f)*ease((.87f-v)/.12f);
+            float leftWidth=.17f*(1-handBand);
+            for(int x=0;x<maskSize;x++){
+                float u=(x+.5f)/maskSize;
+                float alpha=Math.max(leftWidth>0?1-u/leftWidth:0,1-(1-u)/.17f);
+                pixels[y*maskSize+x]=Math.round(255*Math.max(0,alpha))<<24;
+            }
+        }
+        matte.setPixels(pixels,0,maskSize,0,0,maskSize,maskSize);
+        BitmapShader shader=new BitmapShader(matte,Shader.TileMode.CLAMP,Shader.TileMode.CLAMP);
+        Matrix uv=new Matrix();uv.setScale(1f/maskSize,1f/maskSize);shader.setLocalMatrix(uv);
+        mapoEdge.setShader(shader);mapoEdge.setXfermode(edge.getXfermode());
         bolt.moveTo(-.55f,-.11f);bolt.lineTo(-.29f,-.075f);bolt.lineTo(-.20f,-.10f);
         bolt.lineTo(-.225f,-.058f);bolt.lineTo(.025f,-.02f);bolt.lineTo(.078f,-.048f);
         bolt.lineTo(.06f,-.009f);bolt.lineTo(.33f,.045f);bolt.lineTo(.46f,.032f);bolt.lineTo(.56f,.068f);
@@ -125,13 +145,15 @@ final class VenueArrival {
     private static float mix(float s,float e,float t){return s+(e-s)*t;}
     void draw(Canvas c,int w,int h){
         if(!active())return;
+        if(opened){
+            c.drawColor(Color.argb(Math.round(255*(1-ease((time-CROSSOVER)/(float)(END-CROSSOVER)))),19,22,20));
+            return;
+        }
         float scale=Math.min(w/1080f,h/520f);
         float W=w/scale,H=h/scale,L=(1080-W)*.5f,T=(520-H)*.5f;
         float expanded=reduced?1:ease(time/1280f),start=L+venue*W/3,span=W/3;
         float l=mix(start,L,expanded),r=mix(start+span,L+W,expanded),middle=mix(start+span/2,L+W*.285f,expanded);
         c.save();c.scale(scale,scale);c.translate(-L,-T);
-        int layer=-1;
-        if(opened)layer=c.saveLayerAlpha(L,T,L+W,T+H,Math.round(255*(1-ease((time-CROSSOVER)/(float)(END-CROSSOVER)))));
         c.save();c.clipRect(l,T,r,T+H);
         Bitmap room=rooms[venue];
         if(room!=null)a.cover(room,L,T,L+W,T+H);else c.drawColor(0xff22201c);
@@ -141,7 +163,7 @@ final class VenueArrival {
             c.drawRect(0,0,1,1,ink);ink.setShader(null);c.restore();
         }
         int frame=Math.max(0,Math.min(56,(int)((time-190)*56/3250)));
-        menu.arrivingPortrait(venue,middle,1+.145f*expanded,pages[frame/12],frame,expanded,edge);
+        menu.arrivingPortrait(venue,middle,1+.145f*expanded,pages[frame/12],frame,expanded,venue==1?mapoEdge:edge);
         float show=reduced?1:ease((time-1950)/730f),cx=L+W*.691f,cy=T+H*.47f;
         if(show>0){
             float tw=W*(.445f+.031f*show),th=mark==null?tw*.258f:tw*mark.getHeight()/mark.getWidth();
@@ -163,7 +185,8 @@ final class VenueArrival {
             a.text(a.pubs[venue],cx,cy+th/2+34+(1-caption)*6,21,(Math.round(250*caption)<<24)|0xe9d7b5,a.title,Paint.Align.CENTER);
         }
         drawGauge(c,L,T,W,H);
-        c.restore();if(layer>=0)c.restoreToCount(layer);c.restore();
+        c.restore();c.restore();
+        if(time>CROSSOVER-230)c.drawColor(Color.argb(Math.round(255*ease((time-CROSSOVER+230)/230f)),19,22,20));
     }
 
     private void drawGauge(Canvas c,float l,float t,float w,float h){
