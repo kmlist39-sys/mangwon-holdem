@@ -58,12 +58,14 @@ final class StageArt {
             titleElapsed=g.optLong("showdownTitleMs",0);
             lastTitleFrame=0;
         }
-        if(old==null||hand!=g.optInt("hand")){gesture=-1;serial=-1;hand=g.optInt("hand");}
+        boolean fresh=old==null||hand!=g.optInt("hand")||
+            !old.optString("sessionId").equals(g.optString("sessionId"));
+        if(fresh){gesture=-1;serial=-1;hand=g.optInt("hand");}
         JSONObject ev=g.optJSONObject("lastHero");
         if(ev!=null&&serial!=ev.optInt("seq")){
             serial=ev.optInt("seq");String k=ev.optString("kind");
             gesture=k.equals("check")?0:k.equals("call")?1:k.equals("raise")?2:3;
-            gestureAt=old==null?accepted-3000:accepted;
+            gestureAt=fresh?accepted-3000:accepted;
         }
         if(old!=null&&old.optInt("hand")==hand){JSONArray prev=old.optJSONArray("p"),players=g.optJSONArray("p");for(int j=0;j<Math.min(prev.length(),players.length());j++){JSONObject q=players.optJSONObject(j),before=prev.optJSONObject(j);int id=q.optInt("id");if(id>=0&&id==before.optInt("id")&&!q.optString("action").equals(before.optString("action")))badgeTime[id]=accepted;}}
         int next=g.optInt("show");if(next!=shown){shown=next;revealAt=accepted;}
@@ -115,9 +117,12 @@ final class StageArt {
             float leave=TitleSequence.smooth(TitleSequence.range(age,790,360));
             float tap=checkTap(age,300)+checkTap(age,555);
             float x=650+(1-enter)*70+leave*85,y=347+(1-enter)*146+leave*155+tap*5;
-            a.c.save();a.c.rotate(6-tap*5,x+71,y+117);
-            rightHand(0,0,x,y,133,150,(int)(255*(1-tap)));
-            rightHand(1,0,x,y,133,150,(int)(255*tap));
+            // Hinge one opaque right hand at its cuff. Crossfading two silhouettes
+            // exposes the felt between the fingers during each contact.
+            float wristX=x+77,wristY=y+116;
+            a.c.save();a.c.rotate(6-tap*5,wristX,wristY);
+            a.c.scale(1+.022f*tap,1-.102f*tap,wristX,wristY);
+            rightHand(0,0,x,y,133,150,255);
             a.c.restore();
         }
     }
@@ -177,6 +182,7 @@ final class StageArt {
 
     String street(JSONObject t){
         String phase=t.optString("phase");if(phase.equals("done"))return "정산 완료";
+        if(phase.equals("dealing"))return "카드 딜링";
         if(phase.equals("showdown"))return "쇼다운";return a.streets[t.optInt("stage")];
     }
     void tableTicker(){

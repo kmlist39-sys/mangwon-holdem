@@ -120,17 +120,18 @@ const habits=[
 const hangouts=['망원시장','공덕오거리','서교동 작업실 골목','상암동 방송가','성미산길','도화동 강변'];
 const arrivals=arrivalNames.map((name,i)=>{
  const id=50+i,pub=i%8===0?2:i%4===1?0:1;
- const grade=(i*7+Math.floor(i/8))%11,tier=grade<=1?2:grade<=5?1:0;
  const [job,scene]=localTrades[(i*11+Math.floor(i/36)*5)%localTrades.length];
  const [trait,style,tell,line]=habits[(i*3+Math.floor(i/36))%habits.length];
- return {id,name,pub,tier,job,bio:scene,style,trait,tell,line,alias:hangouts[Math.floor(i/36)]+' 단골',
+ return {id,name,pub,job,bio:scene,style,trait,tell,line,alias:hangouts[Math.floor(i/36)]+' 단골',
    agg:.24+(id*31%45)/100,loose:.04+(id*17%29)/100};
 });
-const masters=new Set([2,3,6,16,20,27,29,38,43]);
-const advanced=new Set([0,4,5,8,12,15,17,18,21,22,23,25,31,32,33,34,37,39,40,41,45,46,49]);
+// Permanent profile IDs keep each returning player, portrait and nickname together.
+const masters=new Set([2,3,6,16,20,27,29,38,43,50,61,64,67,78,81,101,112,115,118,132,149,152,155,166,169,189,200,203,206,220,237,240,254,257]);
+const advanced=new Set([0,4,8,12,15,21,33,34,45,63,84,89,95,98,111,129,131,135,138,151,172,183,186,188,217,223,226,243,248,260]);
+const semiPros=new Set([5,17,18,22,23,25,31,32,37,39,40,41,46,49,55,58,69,77,83,97,103,117,128,140,157,174,191,205,225,251]);
 const people=peopleText.split('\n').map((s,id)=>{
- let [name,job,bio,style]=s.split('|'),tier=masters.has(id)?2:advanced.has(id)?1:0;
- return {id,name,job,bio,style,tier,skill:['준프로','프로','탑티어'][tier],pub:id===2?1:id===3?2:id===18||id===34?0:id<18?0:id<34?1:2,agg:(id*31%47)/100+.22,loose:(id*17%29)/100+.04};
+ const [name,job,bio,style]=s.split('|');
+ return {id,name,job,bio,style,pub:id===2?1:id===3?2:id===18||id===34?0:id<18?0:id<34?1:2,agg:(id*31%47)/100+.22,loose:(id*17%29)/100+.04};
 });
 people.push(...arrivals);
 const broadcastStyles={
@@ -153,7 +154,8 @@ const broadcasters=[
  [210,'진솔한 한입','시장 먹방 BJ','야시장 촬영을 끝낸 날이면 손목에 종이 팔찌를 찬 채 나타난다.','flop']
 ];
 for(const person of people){
- person.skill=person.tier===0&&person.id%3!==1?'일반인':['준프로','프로','탑티어'][person.tier];
+ person.tier=masters.has(person.id)?2:advanced.has(person.id)?1:0;
+ person.skill=person.tier===2?'탑티어':person.tier===1?'프로':semiPros.has(person.id)?'준프로':'일반인';
 }
 for(const [id,alias,job,bio,broadcast] of broadcasters){
  Object.assign(people[id],broadcastStyles[broadcast],{skill:'BJ',alias,job,bio,broadcast});
@@ -355,8 +357,10 @@ const traits=['catch','steal','pressure','split','draw','tight','catch','steal',
 function opening(h){let r=h.map(c=>c%13+2).sort((a,b)=>b-a),[a,b]=r;return a===b?.49+a*.032:(a+b)/34+(Math.floor(h[0]/13)===Math.floor(h[1]/13)?.09:0)+(a-b<3?.045:0)-(a-b>4?.06:0)}
 function equity(t,p,hard,background){
  const opponents=opponentsFor(t,p);
- if(!hard)for(const opponent of opponents)opponent.range=0;
- return masterEquity(p.hole,t.boards,opponents,background?(hard?8:5):(hard?44:22)).share;
+ const semiPro=people[p.id]?.skill==='준프로';
+ if(!hard)for(const opponent of opponents)opponent.range*=semiPro?.45:0;
+ const samples=background?(hard?8:semiPro?7:5):(hard?44:semiPro?32:22);
+ return masterEquity(p.hole,t.boards,opponents,samples).share;
 }
 function broadcastAction(t,p,style,bubble){
  const cost=owing(t,p),bigBlind=t.bb;
@@ -682,6 +686,26 @@ function studyDecision(t,p){
    odds:Math.round(odds*1000)/10,equity:Math.round(estimate*100),title,reason,cash:!!g?.cash,
    forced:t.double&&t.bbSeat===-1?{ante:t.ante??cashLevels[g?.cashLevel??0].ante,sb:t.sb}:null};
 }
+// A training mix for the current decision. Equity is sampled against public ranges;
+// the recommendation is an estimate, not a precomputed equilibrium solution.
+function liveStudyGuide(t,p){
+ const spot=studyDecision(t,p),legal=canRaise(t,p);
+ const share=spot.equity/100,required=spot.odds/100;
+ const river=t.stage===3,playingLast=t.actor===t.btn;
+ const realization=river?1:cap(.92+(playingLast?.06:0)-.035*(spot.opponents-1),.72,.98);
+ const edge=share*realization-required;
+ const continueRate=spot.call?1/(1+Math.exp(-edge/.050)):1;
+ const draw=t.stage>0?t.boards.reduce((n,b)=>n+handTexture(p.hole,b).draw,0)/t.boards.length:0;
+ const value=cap((share-(spot.opponents>1?.53:.58))/.32,0,1);
+ const aggression=legal?cap(.025+.78*value+draw*(playingLast?.55:.40)+(playingLast?.035:0),0,.93):0;
+ const fold=spot.call?Math.round(100*(1-continueRate)):0;
+ const raise=legal?Math.min(100-fold,Math.round((100-fold)*aggression)):0;
+ const bet=legal?quickBets(t,p).half.target:0;
+ return {pot:spot.pot,eligible:spot.eligible,call:spot.call,odds:spot.odds,equity:spot.equity,
+   position:spot.position,fold,passive:100-fold-raise,raise,canRaise:legal,raiseTo:bet,
+   opening:t.price===0,allInRaise:legal&&bet===p.bet+p.stack,allInCall:spot.call>0&&spot.call===p.stack,
+   title:spot.title,reason:spot.reason};
+}
 function handTexture(h,board){
  if(h.length===3){
    const pairs=[[h[0],h[1]],[h[0],h[2]],[h[1],h[2]]].map(pair=>handTexture(pair,board));
@@ -791,26 +815,51 @@ function masterDecision(t,p,bubble,background=false){
 function cast(pub,n){
  const seated=new Set();
  for(const game of state.parked||[])for(const table of game?.ts||[])for(const q of table.ps)seated.add(q.id);
- const pool=shuffle(people.filter(p=>!seated.has(p.id)));
- const tables=Math.ceil((n+1)/9);
- const pros=[...pool.filter(p=>p.pub===pub&&p.tier===2),...pool.filter(p=>p.pub!==pub&&p.tier===2)];
- const locals=pool.filter(p=>p.pub===pub&&p.tier<2),visitors=pool.filter(p=>p.pub!==pub&&p.tier<2);
- // Deal one featured opponent to each table; even a short cash game includes visitors.
- const anchors=pros.splice(0,tables),guests=[];
- for(const skill of ['일반인','BJ']){
-   if(guests.length>=n-anchors.length)break;
-   const group=locals.some(p=>p.skill===skill)?locals:visitors;
-   const index=group.findIndex(p=>p.skill===skill);
-   if(index>=0)guests.push(group.splice(index,1)[0]);
+ const available=shuffle(people.filter(p=>!seated.has(p.id)));
+ const pool=[...available.filter(p=>p.pub===pub),...available.filter(p=>p.pub!==pub)];
+ const regulars=pool.filter(p=>p.skill==='일반인'),experts=pool.filter(p=>p.tier===2);
+ const guests=pool.filter(p=>p.tier!==2&&p.skill!=='일반인');
+ // Even if Mapo opens first, leave a broadcaster from each other venue for its next visit.
+ const reserved=new Set();
+ for(let other=0;other<3;other++)if(other!==pub&&!state.parked?.[other]){
+   const guest=guests.find(p=>p.pub===other&&p.skill==='BJ');
+   if(guest)reserved.add(guest.id);
  }
- const remaining=n-anchors.length-guests.length;
- const localCount=Math.min(locals.length,Math.max(0,remaining-Math.min(2,visitors.length)));
- const field=shuffle([...locals.splice(0,localCount),...visitors,...locals,...pros].slice(0,remaining));
+ const away=guests.filter(p=>reserved.has(p.id));
+ const mixed=guests.filter(p=>!reserved.has(p.id));
+ const tables=[];
+ let totalRegulars=0;
+ for(let seats=n;seats>0;){
+   const size=Math.min(seats,tables.length?9:8);
+   const ordinary=Math.min(size,size<=5?3:5);
+   const featured=experts.shift(),players=featured?[featured]:[];
+   if(tables.length===0){
+     const guest=mixed.findIndex(p=>p.skill==='BJ');
+     if(guest>=0)players.push(mixed.splice(guest,1)[0]);
+   }
+   tables.push({size,ordinary:Math.min(ordinary,size-players.length),players});
+   totalRegulars+=tables[tables.length-1].ordinary;
+   seats-=size;
+ }
+ // Share the spare regulars proportionally across all three live fields. This
+ // avoids draining the entire neighborhood into whichever tournament opens first.
+ const target=Math.min(regulars.length,Math.max(totalRegulars,Math.round(n*regulars.length/pool.length)));
+ const order=shuffle([...tables]);
+ while(totalRegulars<target){
+   const previous=totalRegulars;
+   for(const table of order)if(totalRegulars<target&&table.ordinary+table.players.length<table.size){
+     table.ordinary++;totalRegulars++;
+   }
+   if(totalRegulars===previous)break;
+ }
+ // Seed everyone before filling leftovers, so every individual side table has
+ // the intended majority. Depleted or migrated saves can still fill each seat.
+ for(const t of tables)t.players.push(...regulars.splice(0,t.ordinary));
+ const otherPlayers=[...mixed,...experts,...away,...regulars];
  const ids=[];
- for(let i=0;i<tables;i++){
-   const size=Math.min(n-ids.length,i===0?8:9),featured=anchors[i]?[anchors[i]]:[];
-   if(i===0)featured.push(...guests);
-   ids.push(...shuffle([...featured,...field.splice(0,size-featured.length)]).map(p=>p.id));
+ for(const t of tables){
+   t.players.push(...otherPlayers.splice(0,t.size-t.players.length));
+   ids.push(...shuffle(t.players).map(p=>p.id));
  }
  return ids;
 }
@@ -1016,10 +1065,7 @@ function updateBlindNotices(){
    if(!t.hand||c.level<=t.level)continue;
    t.nextBlinds={hand:t.hand+1,level:c.level,sb:c.sb,bb:c.bb,afterBreak};
    // Leave one visible announcement before an automatic deal at the exact clock boundary.
-   if(t.phase==='done'){
-     if(t===main)t.autoNextLeft=Math.max(autoNextRemaining(t),DAILY_RESULT_SECONDS);
-     else t.backDelay=Math.max(t.backDelay||0,DAILY_RESULT_SECONDS);
-   }
+   if(t.phase==='done')t.autoNextLeft=Math.max(autoNextRemaining(t),DAILY_RESULT_SECONDS);
  }
 }
 
@@ -1029,6 +1075,11 @@ function dealAt(t){
  const config=nextDealConfig(t);
  t.nextBlinds=null;
  startHand(t,config);
+ if(t!==g.ts[0]){
+   // Match the native clockwise deal (windup, two laps, flight, turn and landing).
+   t.dealLeft=.93+(2*t.ps.length-1)*(state.opt.speed===2?.112:.16);
+   t.backDelay=0;
+ }
  if(t===g.ts[0]){
    if(!g.cash&&config.level===REBUY_LEVEL&&!g.rebuyLevelSeen)g.rebuyNoticePending=true;
    else if(config.level!==REBUY_LEVEL)g.rebuyNoticePending=false;
@@ -1136,16 +1187,19 @@ function finishOffscreen(t){
  accountFinished(t);
 }
 function backgroundTable(t,dt){
- if(t.allInRunout){
-   if(advancePresentation(t,dt))return;
-   if(t.phase==='street'){dealCommunity(t);return}
- }
+ if(t.phase==='bet'&&t.stage===0&&t.dealLeft>0){t.dealLeft=Math.max(0,t.dealLeft-dt);return}
+ if(advancePresentation(t,dt))return;
  if(t.phase==='bet'){botActWhenDue(t,dt);return}
- t.backDelay=(t.backDelay||0)-dt;if(t.backDelay>0)return;
- t.backDelay=.65/state.opt.speed;
- if(t.phase!=='done'){otherStep(t);return}
+ if(t.phase==='street'){dealCommunity(t);return}
+ if(t.phase==='showdown'){
+   t.backDelay=Math.max(0,(t.backDelay||0)-dt);
+   if(!t.backDelay)t.backDelay=nextShowdownSeat(t,false);
+   return;
+ }
  accountFinished(t);
  if(closeTable(t)||breakDue())return;
+ t.autoNextLeft=Math.max(0,autoNextRemaining(t)-dt);
+ if(t.autoNextLeft>.000001)return;
  readyRoster(t);
  if(t.ps.length>=2)dealAt(t);
 }
@@ -1356,8 +1410,7 @@ function launch(pub,dbl,stake,seats,tables,cashLevel=0){
 const ACTION_SECONDS=15, DAILY_RESULT_SECONDS=3;
 function dailyPace(t){
  if(!g||g.cash)return 'cash';
- if(t!==g.ts[0])return 'background';
- return t.ps.find(p=>p.id===-1)?.fold?'folded':'playing';
+ return t===g.ts[0]&&t.ps.find(p=>p.id===-1)?.fold?'folded':'playing';
 }
 function dailyPause(t,cash,playing,folded){
  const pace=dailyPace(t);
@@ -1388,7 +1441,6 @@ function decisionClock(t){
    let thought;
    if(pace==='cash')thought=Math.max(1.15,difficulty/speed);
    else if(pace==='folded')thought=cap(difficulty*.34/speed,.8,1.65);
-   else if(pace==='background')thought=cap(difficulty*.61/speed,.73,3.6);
    else thought=cap(difficulty*.76/speed,.94,5.2);
    const sameTurn=t.clock?.key===key;
    const elapsed=sameTurn?Math.max(0,t.clock.full-t.clock.left):0;
@@ -1408,8 +1460,7 @@ function botActWhenDue(t,dt){
        hero.move.street===t.stage&&hero.move.total===t.price;
      if(!raisedByHero){
        let pace=g.cash?1:.88;
-       if(!hero)pace=.74;
-       else if(hero.fold)pace=.66;
+       if(hero?.fold)pace=.66;
        const release=.55+(t.ps[t.actor].id%4)*.055+Math.random()*.32;
        clock.actAt=clock.full-Math.max(.38,release*pace/state.opt.speed);
      }
@@ -1458,8 +1509,9 @@ function tournamentLeaders(tournament){
  return result;
 }
 function tableInfo(t,showSeats=true){
- let actor=t.phase==='bet'&&!t.boardHold?t.ps[t.actor]:null,clock=decisionClock(t);
- return {number:t.number,nextBlinds:t.nextBlinds||null,finalRebuyHand:entryOpen(t)&&t.level===REBUY_LEVEL&&breakDue(),rebuyOpen:entryOpen(t),incoming:t.inbound?.length||0,seats:t.ps.length,remain:t.ps.filter(p=>!p.fold).length,stage:t.stage,phase:hasShowdownTitle(t)?'showdown':t.phase,hand:t.hand,feed:t.feed,
+ const dealing=t.phase==='bet'&&t.stage===0&&t.dealLeft>0;
+ let actor=t.phase==='bet'&&!t.boardHold&&!dealing?t.ps[t.actor]:null,clock=actor?decisionClock(t):null;
+ return {number:t.number,nextBlinds:t.nextBlinds||null,finalRebuyHand:entryOpen(t)&&t.level===REBUY_LEVEL&&breakDue(),rebuyOpen:entryOpen(t),incoming:t.inbound?.length||0,seats:t.ps.length,remain:t.ps.filter(p=>!p.fold).length,stage:t.stage,phase:dealing?'dealing':hasShowdownTitle(t)?'showdown':t.phase,hand:t.hand,feed:t.feed,
  pot:t.ps.reduce((a,p)=>a+p.paid,0),actor:actor?nameOf(actor.id):'',isMe:actor?.id===-1,
  time:clock?.left??(actor?.id===-1?(g.timer>0?g.timer:g.bank):0),max:clock?.full??(g.timer>0?ACTION_SECONDS:45),
  players:showSeats?t.ps.map((p,i)=>({id:p.id,...publicSkill(p),name:nameOf(p.id),rebuys:rebuyCountOf(p),buyin:p.buyin??g.buyin,banked:p.banked||0,stack:t.phase==='showdown'&&t.preAward?t.preAward[i]:p.stack,action:p.action,fold:p.fold,active:p===actor})):undefined};
@@ -1501,6 +1553,19 @@ function dealCommunity(t){
 function foldReservationLive(t,hero){
  return g.stage==='playing'&&!g.rebuyAsk&&hero&&!hero.fold&&hero.stack>0&&!t.open&&
    (t.phase==='bet'||t.phase==='street');
+}
+function nextShowdownSeat(t,foreground){
+ if(t.reveal>=t.lines.length){
+   if(foreground)record(t);
+   t.phase='done';t.feed=t.summary;return 0;
+ }
+ const line=t.lines[t.reveal++];t.feed=line.text;
+ if(foreground)spoken=line.text.replace(/^나,/, '플레이어,');
+ if(t.double)return .84;
+ if(!state.opt.voice)return dailyPause(t,1.2,1,.78);
+ // The real dealer clip holds only the foreground clock. Give an offscreen
+ // participant time to turn their hand before that table announces the next.
+ return dailyPause(t,1.7,.78,.32)+(foreground?0:1.2);
 }
 function canReserveFold(t,hero){
  return foldReservationLive(t,hero)&&t.phase==='bet'&&!t.boardHold&&t.ps[t.actor]?.id>=0;
@@ -1551,14 +1616,7 @@ function step(dt,inspecting,holdTable,voiceBusy=false,clockDt=dt){if(!g)return;
  if(t.phase==='bet'){botActWhenDue(t,dt);g.timer=ACTION_SECONDS;if(t.phase==='showdown')delay=1.82;return}
  delay-=dt;if(delay>0)return;
  if(t.phase==='street'){dealCommunity(t);delay=0;g.timer=ACTION_SECONDS}
- else if(t.phase==='showdown'){
-   if(t.reveal<t.lines.length){
-     let l=t.lines[t.reveal++];spoken=l.text.replace(/^나,/, '플레이어,');t.feed=l.text;
-     // Recorded names and hands already hold the foreground rules clock until
-     // the final clip completes. This delay is breathing room after the voice.
-     delay=t.double?.84:state.opt.voice?dailyPause(t,1.7,.78,.32):dailyPause(t,1.2,1,.78);
-   }else{record(t);t.phase='done';t.feed=t.summary}
- }
+ else if(t.phase==='showdown')delay=nextShowdownSeat(t,true);
 }
 const cashierOffers={
  reward:{points:50000,maxWallet:50000},
@@ -1708,6 +1766,12 @@ function prepareAttendance(day){
  return JSON.stringify({session:JSON.stringify({...state,g,attendanceDay:day,wallet})});
 }
 function mobile(raw){let c=JSON.parse(raw),t=g?.ts[0],preFoldConsumed=false,venueChange='';notice='';spoken='';
+ if(c.op==='liveGuide'){
+   const p=t?.ps[t.actor];
+   if(!p||p.id!==-1||t.phase!=='bet'||t.boardHold||g.exitId!==c.session||g.count!==c.hand||
+      t.stage!==c.street||Math.min(owing(t,p),p.stack)!==c.call||t.ps.reduce((n,q)=>n+q.paid,0)!==c.pot)return '{}';
+   return JSON.stringify(liveStudyGuide(t,p));
+ }
  if(c.op==='prepareAttendance')return prepareAttendance(c.day);
  let attendancePaid=false;
  if(c.op==='confirmAttendance'&&pendingAttendance?.day===c.day&&state.wallet+ATTENDANCE_POINTS===pendingAttendance.wallet){

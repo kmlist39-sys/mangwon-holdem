@@ -19,6 +19,14 @@ final class VenueArrival {
     private final PubMenu menu;
     private final Bitmap[] rooms=new Bitmap[3];
     private Bitmap mark;
+    private Shader polishedLetters;
+    // In wordmark coordinates. The broad amber trough and narrow ivory edge
+    // cross a stroke together, like a lamp reflected off brushed gold leaf.
+    private final LinearGradient lamp=new LinearGradient(0,0,.268f,.014f,
+            new int[]{0x00673a12,0x624d321c,0x38614620,0x81f8c676,0xeafffced,0x88fff2bf,0x22eed096,0x00b5834e},
+            new float[]{0,.19f,.32f,.49f,.57f,.64f,.82f,1},Shader.TileMode.CLAMP);
+    private final Matrix lampPosition=new Matrix();
+    private final Paint reflection=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
     private final Paint ink=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
     private final Paint edge=new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint mapoEdge=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
@@ -63,9 +71,42 @@ final class VenueArrival {
             Bitmap[] art=new Bitmap[names.length];
             for(int i=0;i<names.length;i++) art[i]=read(names[i]);
             Bitmap logo=read("opening-title.webp");
-            a.host.ui.post(()->{System.arraycopy(art,0,rooms,0,art.length);mark=logo;});
+            if(logo==null)logo=fallbackLogo();
+            final Bitmap letters=logo;
+            BitmapShader cutout=letterMask(letters);
+            a.host.ui.post(()->{
+                System.arraycopy(art,0,rooms,0,art.length);mark=letters;
+                polishedLetters=new ComposeShader(lamp,cutout,PorterDuff.Mode.DST_IN);
+                reflection.setShader(polishedLetters);a.postInvalidateOnAnimation();
+            });
         },"VenueEntranceArt");
         loader.start();
+    }
+    private Bitmap fallbackLogo(){
+        Bitmap image=Bitmap.createBitmap(880,226,Bitmap.Config.ARGB_8888);
+        Paint letters=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.SUBPIXEL_TEXT_FLAG);
+        letters.setTypeface(a.title);letters.setTextSize(150);
+        String name="망원동 홀덤";
+        letters.setTextSize(150*845/letters.measureText(name));
+        letters.setColor(0xffead3a7);letters.setTextAlign(Paint.Align.CENTER);
+        float baseline=(image.getHeight()-letters.ascent()-letters.descent())*.5f;
+        new Canvas(image).drawText(name,image.getWidth()*.5f,baseline,letters);
+        return image;
+    }
+    private static BitmapShader letterMask(Bitmap image){
+        int w=image.getWidth(),h=image.getHeight();
+        int[] pixels=new int[w*h];image.getPixels(pixels,0,w,0,0,w,h);
+        for(int i=0;i<pixels.length;i++){
+            int c=pixels[i],light=(Color.red(c)*3+Color.green(c)*6+Color.blue(c))/10;
+            // The dark stamped outline, holes and cast shadow never catch the lamp.
+            int coverage=Math.round(Color.alpha(c)*ease((light-98)/112f));
+            pixels[i]=(coverage<<24)|0xffffff;
+        }
+        Bitmap mask=Bitmap.createBitmap(pixels,w,h,Bitmap.Config.ARGB_8888);
+        mask.prepareToDraw();
+        BitmapShader shader=new BitmapShader(mask,Shader.TileMode.CLAMP,Shader.TileMode.CLAMP);
+        Matrix uv=new Matrix();uv.setScale(1f/w,1f/h);shader.setLocalMatrix(uv);
+        return shader;
     }
     private Bitmap read(String name){
         try(InputStream in=a.host.getAssets().open(name)){
@@ -164,7 +205,7 @@ final class VenueArrival {
         }
         int frame=Math.max(0,Math.min(56,(int)((time-190)*56/3250)));
         menu.arrivingPortrait(venue,middle,1+.145f*expanded,pages[frame/12],frame,expanded,venue==1?mapoEdge:edge);
-        float show=reduced?1:ease((time-1950)/730f),cx=L+W*.691f,cy=T+H*.47f;
+        float show=reduced?1:ease((time-890)/920f),cx=L+W*.691f,cy=T+H*.47f;
         if(show>0){
             float tw=W*(.445f+.031f*show),th=mark==null?tw*.258f:tw*mark.getHeight()/mark.getWidth();
             float flash=(float)Math.sin(Math.PI*ease((time-1940)/485f))+.55f*(float)Math.sin(Math.PI*ease((time-2490)/275f));
@@ -180,6 +221,15 @@ final class VenueArrival {
             if(mark!=null){
                 dst.set(cx-tw/2,cy-th/2+(1-show)*19,cx+tw/2,cy+th/2+(1-show)*19);
                 ink.setColor(-1);ink.setAlpha(Math.round(255*show));c.drawBitmap(mark,null,dst,ink);
+                float travel=(time-1220)/1950f;
+                if(!reduced&&polishedLetters!=null&&travel>0&&travel<1){
+                    float center=mix(-.18f,1.18f,travel);
+                    lampPosition.setTranslate(center-.134f,.5f);lamp.setLocalMatrix(lampPosition);
+                    reflection.setAlpha(Math.round(237*show));
+                    c.save();c.translate(dst.left,dst.top);c.scale(tw,th);
+                    c.drawRect(Math.max(0,center-.19f),0,Math.min(1,center+.19f),1,reflection);
+                    c.restore();
+                }
             }else a.text("망원동 홀덤",cx,cy,48,(Math.round(255*show)<<24)|0xffdfb5,a.title,Paint.Align.CENTER);
             float caption=reduced?1:ease((time-2480)/620f);
             a.text(a.pubs[venue],cx,cy+th/2+34+(1-caption)*6,21,(Math.round(250*caption)<<24)|0xe9d7b5,a.title,Paint.Align.CENTER);

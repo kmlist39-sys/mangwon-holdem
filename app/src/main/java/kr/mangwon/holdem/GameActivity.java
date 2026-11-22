@@ -154,6 +154,7 @@ public final class GameActivity extends Activity {
     }
     void frame(long now){
         if(!loaded||!active||!arena.tableOpen()){lastTick=now;return;}
+        studyBilling.renewDuringPlay();
         JSONObject game=arena.g;
         JSONObject gate=game.optJSONObject("levelAd");
         if(gate!=null){lastTick=now;handleLevelAd(gate);return;}

@@ -20,6 +20,7 @@ public final class Arena extends View {
  final BlindTicker blindTicker=new BlindTicker(this);
  private long pocketTurnSampleAt;
  String studyReturn="";
+ final LiveCoach liveCoach=new LiveCoach(this);
  final WagerDisplay wages=new WagerDisplay(this);final NameplateClock nameClock=new NameplateClock(this);
  final CastArt castArt=new CastArt(this); final StageArt stage; final PubMenu pubMenu; final CharacterProfile character; String profileReturn=""; final long[] foldStarted=new long[CastArt.COUNT+1]; final CommunityDeal community=new CommunityDeal(this); final GameActivity host; Canvas c; final Paint p=new Paint(3); final RectF rect=new RectF();
  Bitmap pub,table,faces,calm,busts,chipArt; long feeChangedAt; final DealAnimation deal=new DealAnimation(this);  int fee=50000,cashSeats=6,cashLevel=0; final int[] tablesChoice={2,12}; JSONObject snapshot=new JSONObject(),g,opt=new JSONObject(); JSONArray people=new JSONArray();
@@ -53,7 +54,7 @@ public final class Arena extends View {
  boolean rebuyWarningVisible(){return g!=null&&screen.equals("table")&&panel.isEmpty()&&g.optBoolean("rebuyNoticePending");}
  boolean tableOpen(){return screen.equals("table")&&(panel.isEmpty()||panel.equals("tables")||panel.equals("wagers")||panel.equals("receipt")||panel.equals("profile"))&&g!=null&&!rebuyWarningVisible();}
  boolean live(){return tableOpen()&&!deal.running();}
- boolean back(){if(pubMenu.arrival.back())return true;if(attendance.dismiss())return true;if(rebuyWarningVisible()){host.command("ackRebuyNotice","session",g.optString("sessionId"));return true;}if(intro.blocking())return intro.back();if(tournamentBanner.showing())return true;if(panel.equals("shop"))host.rewardAds.leave();if(!panel.isEmpty()){if(panel.equals("surrender"))panel="pause";else if(panel.equals("gtoSample")||panel.equals("gtoReview"))panel="gtoStore";else if(panel.equals("gtoStore"))panel=studyReturn;else if(panel.equals("profile"))panel=profileReturn;else if(panel.equals("confirm"))panel="shop";else if(panel.equals("shop")&&shopFromEntry){shopFromEntry=false;panel="entry";}else panel="";invalidate();return true;}if(screen.equals("table")){panel="pause";invalidate();return true;}return false;}
+ boolean back(){if(panel.isEmpty()&&liveCoach.dismiss())return true;if(pubMenu.arrival.back())return true;if(attendance.dismiss())return true;if(rebuyWarningVisible()){host.command("ackRebuyNotice","session",g.optString("sessionId"));return true;}if(intro.blocking())return intro.back();if(tournamentBanner.showing())return true;if(panel.equals("shop"))host.rewardAds.leave();if(!panel.isEmpty()){if(panel.equals("surrender"))panel="pause";else if(panel.equals("gtoSample")||panel.equals("gtoReview"))panel="gtoStore";else if(panel.equals("gtoStore"))panel=studyReturn;else if(panel.equals("profile"))panel=profileReturn;else if(panel.equals("confirm"))panel="shop";else if(panel.equals("shop")&&shopFromEntry){shopFromEntry=false;panel="entry";}else panel="";invalidate();return true;}if(screen.equals("table")){panel="pause";invalidate();return true;}return false;}
  String fmt(long n){
      String value=numbers.get(n);
      if(value==null){if(numbers.size()>=256)numbers.clear();value=commaFormat.format(n);numbers.put(n,value);}
@@ -304,7 +305,7 @@ public final class Arena extends View {
  String myPosition=seatTag(hero);
  if(!myPosition.isEmpty()){box(336,376,369,390,7,0xffe4cda4);mid(myPosition,352.5f,387,10,ink);}
  ShowdownOdds.hero(this,me);
- String feed=g.optString("feed");stage.tableTicker();stage.chips.call();stage.heroGesture();stage.bet.badge(me,392,419,108);payouts.labels();
+ String feed=g.optString("feed");stage.tableTicker();stage.chips.call();stage.bet.badge(me,392,419,108);payouts.labels();
  String phase=g.optString("phase");if(deal.running()){}else if(g.optBoolean("rebuy")){key("대회 종료",698,446,134,52,"decline",0);int cost=g.optInt("rebuyFee",60000);boolean funded=snapshot.optInt("wallet")>=cost;key(funded?shortP(cost)+"P 리바인":"포인트 충전",842,446,215,52,funded?"re":"shop",1);}
  else if(g.optBoolean("break")){key("휴식 종료",842,446,215,52,"skip",1);mid("휴식  "+(int)g.optDouble("breakLeft")+"초",541,484,23,paper);}
  else if(phase.equals("done")){stage.bet.result();
@@ -314,8 +315,9 @@ public final class Arena extends View {
  }
  else if(phase.equals("showdown")&&g.optInt("show")>0){stage.showdownRank(ps,feed);}else if(phase.equals("suspense")||phase.equals("board")||phase.equals("street")||phase.equals("showdown")){/* Leave the felt clear while the hand settles. */}
  else{JSONObject who=ps.optJSONObject(g.optInt("actor"));if(who!=null)stage.turnNotice(who.optString("name")+"의 차례",944,475,false);}
- wages.draw();stage.heroWagerHand();ChipLeaders.draw(this,false);tournamentBanner.bubble(tournament,now);blindTicker.draw(now);washMotion.drawCredit();
+ wages.draw();stage.heroWagerHand();stage.heroGesture();ChipLeaders.draw(this,false);tournamentBanner.bubble(tournament,now);blindTicker.draw(now);washMotion.drawCredit();
  if(g.optBoolean("showdownTitle"))stage.showdownTitle();
+ liveCoach.draw();
  }
  void seat(JSONObject q,int idx,float x,float y,Path seatMask){
      int id=q.optInt("id");
@@ -493,6 +495,8 @@ public final class Arena extends View {
  void action(String a){if(a.isEmpty()||!host.loaded)return;if(attendance.action(a)||display.action(a))return;if(opt.optBoolean("sound")&&!a.equals("peek"))host.fx("tap",.26f);
  if(rebuyWarningVisible()){if(a.equals("ackRebuyNotice"))host.command(a,"session",g.optString("sessionId"));return;}
  if(a.equals("voiceSample")){host.dealerVoice.preview();return;}
+ if(a.equals("liveCoach")){liveCoach.toggle();return;}
+ if(a.equals("coachPanel"))return;
  if(a.equals("privacyPolicy")){PrivacyPolicy.show(host);return;}
  if(a.equals("gtoStore")){
      if(!panel.startsWith("gto"))studyReturn=panel;

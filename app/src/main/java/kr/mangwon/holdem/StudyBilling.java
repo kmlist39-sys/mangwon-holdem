@@ -88,16 +88,19 @@ final class StudyBilling {
     boolean unlocked() {
         return BuildConfig.DEBUG || (checked && active && SystemClock.elapsedRealtime() - lastCheck < 300000);
     }
-    String storeLabel() { return unlocked() ? "GTO 핸드 복기" : "GTO 구매하기"; }
+    String storeLabel() { return unlocked() ? "GTO 가이드" : "GTO 구매하기"; }
+    void renewDuringPlay(){
+        if(client!=null&&active&&!checking&&SystemClock.elapsedRealtime()-lastCheck>=240000)refresh();
+    }
     boolean canBuy() {
         return client != null && client.isReady() && checked && !checking && !active && !pending
             && !buying && product != null && !offerToken.isEmpty();
     }
     String displayPrice() { return price.isEmpty() ? "월 2,900원 · 한국 기준" : "월 " + price; }
     String status() {
-        if (BuildConfig.DEBUG) return "테스트 APK에서는 내가 플레이한 핸드를 무료로 복기할 수 있습니다.";
+        if (BuildConfig.DEBUG) return "테스트 APK에서는 실시간 가이드가 무료로 켜져 있습니다.";
         if (pending) return "결제 대기 중 · Google Play 승인 후 이용할 수 있습니다.";
-        if (unlocked()) return "홀덤 공부 구독을 이용 중입니다.";
+        if (unlocked()) return "구독 이용 중 · 테이블에서 실시간 가이드가 켜집니다.";
         if (!message.isEmpty()) return message;
         if (connecting || checking) return "Google Play에서 구독 정보를 확인하고 있습니다.";
         return product != null ? "Google Play에서 결제 금액과 갱신 조건을 확인하세요." : "구독 상품 정보를 확인하고 있습니다.";
@@ -122,7 +125,8 @@ final class StudyBilling {
 
     private void query() {
         if (checking || closed) return;
-        checked = false; checking = true; message = ""; product = null; offerToken = "";
+        if(!active)checked=false;
+        checking = true; message = ""; product = null; offerToken = "";
         final int generation = ++request;
         QueryProductDetailsParams.Product item = QueryProductDetailsParams.Product.newBuilder()
             .setProductId(PRODUCT).setProductType(BillingClient.ProductType.SUBS).build();
