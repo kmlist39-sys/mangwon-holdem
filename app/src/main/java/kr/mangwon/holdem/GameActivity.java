@@ -18,6 +18,10 @@ public final class GameActivity extends Activity {
     Handler worker; HandlerThread thread; Arena arena;
     volatile boolean active; boolean pending,loaded; long lastTick,lastSave;
     SoundPool sounds; final Map<String,Integer> soundIds=new HashMap<>(),lengths=new HashMap<>();
+    private static final int SOUND_STREAMS=6;
+    private final int[] cardStreams=new int[SOUND_STREAMS];
+    private int nextCardStream;
+    private boolean hasCardStreams;
     final Set<Integer> ready=new HashSet<>(); long talkingUntil; DealerVoice dealerVoice;
     PubMusic music; RewardAdDesk rewardAds; DailyInterstitial dailyAd;
     StudyBilling studyBilling;
@@ -33,7 +37,7 @@ public final class GameActivity extends Activity {
         arena=new Arena(this);arena.intro.prepare(b==null&&!openedInProcess);openedInProcess=true;dealerVoice=new DealerVoice(this);rewardAds=new RewardAdDesk(this);dailyAd=new DailyInterstitial(this);setContentView(arena);
         if(Build.VERSION.SDK_INT>=33)getOnBackInvokedDispatcher().registerOnBackInvokedCallback(android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,()->{if(!arena.back())finish();});
         thread=new HandlerThread("PokerRules");thread.start();worker=new Handler(thread.getLooper());
-        sounds=new SoundPool.Builder().setMaxStreams(6).setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_GAME).build()).build();
+        sounds=new SoundPool.Builder().setMaxStreams(SOUND_STREAMS).setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_GAME).build()).build();
         sounds.setOnLoadCompleteListener((pool,id,status)->{if(status==0)ready.add(id);});
         try{JSONObject durations=new JSONObject(new String(bytes("sounds.json"),"UTF-8"));Iterator<String> it=durations.keys();while(it.hasNext()){String key=it.next();try(AssetFileDescriptor fd=getAssets().openFd("sfx/"+key+".wav")){soundIds.put(key,sounds.load(fd,1));lengths.put(key,durations.optInt(key));}}}catch(Exception e){android.util.Log.e("Mangwon","Audio assets",e);}
         worker.post(()->{try{boot(bytes("club.js"));JSONObject state=new JSONObject(call(args("op","init","data",getPreferences(0).getString("session",""),"completedAds",getPreferences(0).getLong("completedAds",0),"levelAds",dailyAd.enabled()).toString()));JSONObject restored=state.optJSONObject("g");if(state.optBoolean("rewardApplied")||restored!=null&&restored.optBoolean("cash")&&restored.optBoolean("ready"))persist();JSONArray people=new JSONArray(call("{\"op\":\"roster\"}"));ui.post(()->{if(isDestroyed())return;arena.people=people;present(state);loaded=true;arena.intro.ready();lastTick=SystemClock.uptimeMillis();rewardAds.start();});}catch(Exception e){android.util.Log.e("Mangwon","Startup",e);}});
@@ -175,7 +179,22 @@ public final class GameActivity extends Activity {
             command("step","dt",Math.min(.7,clockDt),"clockDt",clockDt,"inspect",arena.panel.equals("tables"),"holdTable",arena.deal.running()||arena.panel.equals("wagers")||arena.panel.equals("receipt")||arena.panel.equals("profile")||now<talkingUntil);
         }
     }
-    void fx(String key,float volume){Integer id=soundIds.get(key);if(id!=null&&ready.contains(id)&&active)sounds.play(id,volume,volume,1,0,1f);}
+    int fx(String key,float volume){Integer id=soundIds.get(key);return id!=null&&ready.contains(id)&&active?sounds.play(id,volume,volume,1,0,1f):0;}
+    void cardFx(String key,float volume){
+        if(!arena.opt.optBoolean("sound")||!arena.panel.isEmpty()||arena.rebuyWarningVisible())return;
+        int stream=fx(key,volume);
+        if(stream==0)return;
+        cardStreams[nextCardStream]=stream;
+        nextCardStream=(nextCardStream+1)%cardStreams.length;
+        hasCardStreams=true;
+    }
+    void stopCardFx(){
+        if(!hasCardStreams)return;
+        for(int stream:cardStreams)if(stream!=0)sounds.stop(stream);
+        Arrays.fill(cardStreams,0);
+        nextCardStream=0;
+        hasCardStreams=false;
+    }
     void present(JSONObject state){
         dealerVoice.observe(state);
         arena.accept(state);
@@ -186,8 +205,8 @@ public final class GameActivity extends Activity {
         musicEnabled=!musicEnabled;music.setEnabled(musicEnabled);
         getPreferences(0).edit().putBoolean("pubMusic",musicEnabled).apply();arena.invalidate();
     }
-    @Override protected void onResume(){super.onResume();active=true;immersive();studyBilling.refresh();music.setActive(dailyAd==null||!dailyAd.showing());lastTick=SystemClock.uptimeMillis();if(arena!=null){if(rewardNoticeOnReturn!=null){arena.note(rewardNoticeOnReturn);rewardNoticeOnReturn=null;}arena.invalidate();}}
-    @Override protected void onPause(){arena.intro.pause();active=false;music.setActive(false);dealerVoice.stop();talkingUntil=0;if(worker!=null)worker.post(this::persist);super.onPause();}
+    @Override protected void onResume(){super.onResume();active=true;immersive();studyBilling.refresh();music.setActive(dailyAd==null||!dailyAd.showing());lastTick=SystemClock.uptimeMillis();if(arena!=null){arena.community.begin(true);if(rewardNoticeOnReturn!=null){arena.note(rewardNoticeOnReturn);rewardNoticeOnReturn=null;}arena.invalidate();}}
+    @Override protected void onPause(){arena.intro.pause();active=false;stopCardFx();music.setActive(false);dealerVoice.stop();talkingUntil=0;if(worker!=null)worker.post(this::persist);super.onPause();}
     @Override protected void onUserLeaveHint(){rewardAds.leave();super.onUserLeaveHint();}
     @Override protected void onDestroy(){studyBilling.close();worker.post(()->thread.quitSafely());ui.removeCallbacksAndMessages(null);dealerVoice.release();music.release();sounds.release();super.onDestroy();}
     @Override public void onWindowFocusChanged(boolean b){super.onWindowFocusChanged(b);if(b)immersive();}

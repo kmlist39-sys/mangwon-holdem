@@ -1,6 +1,6 @@
 # 망원동 홀덤
 
-**[안드로이드 테스트용 APK · v0.8.5.2 (공유받은 Google 계정)](https://drive.google.com/file/d/1ruJGs_HFGjPQTBqujcAZOC9Z07Op4jNJ/view?usp=drivesdk)**
+**[안드로이드 테스트용 APK · v0.8.5.3 (공유받은 Google 계정)](https://drive.google.com/file/d/1ruJGs_HFGjPQTBqujcAZOC9Z07Op4jNJ/view?usp=drivesdk)**
 
 **동네에서 하던 룰 그대로!** 266명의 캐릭터가 참가하는 안드로이드 싱글플레이 홀덤입니다. 내 자리는 항상 6시 방향입니다. 자리를 보관하고 로비로 돌아가면 다른 대회나 당산 게임에 참여할 수 있습니다.
 

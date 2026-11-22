@@ -93,10 +93,13 @@ public final class Arena extends View {
  stage.rebuys.observe(old,g,v.optJSONArray("tournamentEvents"),SystemClock.uptimeMillis());
  if(g!=null){stage.onSnapshot(old,g);int h=g.optInt("hand"),st=g.optInt("street");String ph=g.optString("phase"),feed=g.optString("feed");long t=SystemClock.uptimeMillis();payouts.observe(old,g,t);
  boolean newHand=old==null||h!=lastHand||!g.optString("sessionId").equals(old.optString("sessionId"));
- if(newHand){dealAt=t;boardAt=resumed?t-4000:t;deal.begin(g,!resumed&&screen.equals("table"));chipSeat=-2;lastHand=h;Arrays.fill(foldStarted,0);peel=0;raise=0;if(!resumed&&opt.optBoolean("sound"))host.fx("deal",.65f);}
+ if(newHand){dealAt=t;boardAt=resumed?t-4000:t;deal.begin(g,!resumed&&screen.equals("table"));chipSeat=-2;lastHand=h;Arrays.fill(foldStarted,0);peel=0;raise=0;}
  folds.observe(old,g,t,newHand);
  acting.observe(g,t,newHand);
- if(st!=lastStreet){boardAt=resumed?t-4000:t;lastStreet=st;if(!resumed&&opt.optBoolean("sound"))host.fx("deal",.8f);}
+ if(newHand||st!=lastStreet){
+     boardAt=resumed?t-4000:t;lastStreet=st;
+     community.begin(resumed||!screen.equals("table"));
+ }
  boolean enteringTitle=g.optBoolean("showdownTitle")&&(old==null||h!=old.optInt("hand")||!old.optBoolean("showdownTitle"));
  if(!ph.equals(prevPhase)||enteringTitle){phaseAt=enteringTitle?t-g.optLong("showdownTitleMs",0):t;prevPhase=ph;}
  if(enteringTitle&&old!=null&&g.optLong("showdownTitleMs",0)<400&&opt.optBoolean("sound"))
@@ -148,6 +151,7 @@ public final class Arena extends View {
      attendance.refresh();
      boolean tableScreen=screen.equals("table")&&g!=null;
      boolean room=tableScreen||panel.equals("entry"),awardScreen=podium.showing();
+     if(!tableScreen||!panel.isEmpty()||!opt.optBoolean("sound")||rebuyWarningVisible())host.stopCardFx();
      deal.update(now,host.active&&tableScreen&&panel.isEmpty());
      int w=getWidth(),h=getHeight();
      int playHeight=tableScreen?Math.max(1,h-stage.bet.dockPixels()):h;
