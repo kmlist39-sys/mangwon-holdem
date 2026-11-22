@@ -1,0 +1,12 @@
+<resources>
+    <string name="squeeze_setting">Squeeze hole cards</string>
+    <string name="squeeze_quick">Squeeze cards</string>
+    <string name="squeeze_next">Cards will be dealt face down from the next hand.</string>
+    <string name="squeeze_auto">Cards will be dealt face up from the next hand.</string>
+    <string name="squeeze_setting_detail">Changes apply from the next hand. Swipe up and release to reveal.</string>
+    <string name="squeeze_hint">Swipe up to reveal</string>
+    <string name="squeeze_wait">Showdown · Swipe up to reveal</string>
+    <string name="squeeze_on">On</string>
+    <string name="squeeze_off">Off</string>
+    <string name="squeeze_study">Reveal your hole cards to see this hand’s study.</string>
+</resources>

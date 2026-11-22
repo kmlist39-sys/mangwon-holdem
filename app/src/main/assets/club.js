@@ -189,7 +189,7 @@ function pay(p,n){n=Math.max(0,Math.min(n,p.stack));p.stack-=n;p.bet+=n;p.paid+=
 const SHOWDOWN_TITLE_SECONDS=2.38, POCKET_TURN_SECONDS=.82;
 function startHand(t,c){
  t.open=false;t.allInRunout=false;t.titleLeft=0;t.pocketTurnLeft=0;t.preFoldHand=null;
- t.wagers=[];t.settlement=null;t.preflopRaises=0;
+ t.wagers=[];t.settlement=null;t.squeezeSettlementPending=false;t.preAward=null;t.preflopRaises=0;
  t.hand++;t.beforeStreet=0;t.boardHold=0;t.curtain=0;t.dc=deck();t.double=c.double;t.level=c.level;t.bb=c.bb;t.sb=c.sb;t.stage=0;t.phase='bet';t.boards=c.double?[[],[]]:[[]];t.btn=(t.btn+1)%t.ps.length;t.lines=[];t.wins={};t.feed='카드 배분';t.reveal=0;t.summary='';t.total=0;
  if(c.double)t.bb=c.sb;
  t.ante=c.double?(c.ante??10000):0;
@@ -235,7 +235,7 @@ function quickBets(t,p){
  return result;
 }
 function act(t,kind,target,intent){if(t.phase!=='bet')return false;let i=t.actor,p=t.ps[i];if(!p)return false;let cost=owing(t,p),priorBet=p.bet,priorPrice=t.price;
- const study=p.id===-1&&g?.ts?.[0]===t&&(kind!=='raise'||canRaise(t,p))?studyDecision(t,p):null;
+ const study=p.id===-1&&g?.ts?.[0]===t&&g.revealed!==false&&(kind!=='raise'||canRaise(t,p))?studyDecision(t,p):null;
  if(kind==='raise'){if(!canRaise(t,p))return false;let max=p.stack+p.bet;target=Math.min(max,Math.max(t.price+t.raise,Math.round(target)));let delta=target-t.price;if(delta<=0)return false;if(t.stage===0)t.preflopRaises=preflopRaiseCount(t)+1;if(delta>=t.raise)t.raise=delta;t.price=target;pay(p,target-p.bet);p.action=p.stack?'레이즈 '+money(target):'올인';t.pending=t.ps.map((q,j)=>j!==i&&!q.fold&&q.stack&&q.bet<target?j:-1).filter(j=>j>=0)}
  else if(kind==='fold'){p.fold=true;p.folds++;p.action='폴드'}else{let n=pay(p,cost);p.action=n?(p.stack?'콜 ':'올인 ')+money(n):'체크'}
  let actionKind=kind==='call'?(cost?'call':'check'):kind;
@@ -300,9 +300,31 @@ function distributeRake(pots,total,rake){
  }).sort((a,b)=>b.remainder-a.remainder||a.p.index-b.p.index);
  for(let i=0;i<rake-used;i++)remainders[i].p.rake++;
 }
+function canSqueezeHole(t){
+ if(!g||g.revealed!==false||t!==g.ts[0]||!t.ps.some(p=>p.id===-1&&!p.fold))return false;
+ if(t.curtain>0||t.titleLeft>0||t.pocketTurnLeft>0)return false;
+ return ['bet','street','showdown'].includes(t.phase);
+}
+function revealHeroHole(t){
+ g.revealed=true;
+ if(t.squeezeSettlementPending&&!t.curtain&&!t.titleLeft&&!t.pocketTurnLeft)finishSqueezedShowdown(t);
+}
+function finishSqueezedShowdown(t){
+ t.squeezeSettlementPending=false;
+ settle(t);
+ // Opponents have already turned over their cards during the first public title.
+ t.open=true;t.curtain=0;t.titleLeft=0;t.pocketTurnLeft=0;delay=.65;
+}
 function settle(t,historical=false){
  if(t.settlement?.hand===t.hand)return;
  const live=t.ps.filter(p=>!p.fold),show=live.length>1;
+ if(!historical&&t===g?.ts[0]&&g.revealed===false&&show&&live.some(p=>p.id===-1)){
+   if(!t.squeezeSettlementPending){
+     t.squeezeSettlementPending=true;t.phase='showdown';t.reveal=0;t.summary='';t.lines=[];t.feed='쇼다운';
+     if(!t.allInRunout){t.curtain=dailyPause(t,1.1,.94,.68);t.titleLeft=SHOWDOWN_TITLE_SECONDS;}
+   }
+   return;
+ }
  const scores=new Map(),clockwise=[];t.lines=[];t.wins={};t.byBoard=t.boards.map(()=>({}));
  for(let k=1;k<=t.ps.length;k++){
    const p=t.ps[(t.btn+k)%t.ps.length];if(p.fold)continue;clockwise.push(p);
@@ -344,7 +366,7 @@ function settle(t,historical=false){
  t.summary=Object.entries(t.wins).map(([id,n])=>nameOf(+id)+' +'+money(n)).join('  /  ');t.feed=show?'쇼다운':t.summary;t.reveal=0;
 }
 function restoreSettledHand(t){
- if(t.settlement||!['done','showdown'].includes(t.phase)||!t.preAward||!t.wins)return;
+ if(t.squeezeSettlementPending||t.settlement||!['done','showdown'].includes(t.phase)||!t.preAward||!t.wins)return;
  const live=t.ps.filter(p=>!p.fold);
  if(!live.length||t.ps.length!==t.preAward.length||live.length>1&&t.boards.some(b=>b.length!==5))return;
  // Prior versions paid each contribution tier separately with zero rake. Rebuild
@@ -397,7 +419,7 @@ function ai(t,bubble,background=false){
    const action=broadcastAction(t,p,broadcast,bubble);
    if(action)return action;
  }
- if(people[p.id]?.tier===2)return masterDecision(t,p,bubble,background);let hard=people[p.id]?.tier===1,a=people[p.id]||people[0],pot=t.ps.reduce((s,q)=>s+q.paid,0),call=Math.min(p.stack,owing(t,p)),price=call/(pot+call||1),late=t.actor===t.btn;let hero=t.ps.find(q=>q.id===-1),read=hero&&hero.seen>6?hero.folds/hero.seen:0;let ag=a.agg+(late?.08:0)+(hard?read*.08:0);let trait=a.trait||traits[p.id],pressure=(trait==='pressure'&&bubble),tight=trait==='tight',loose=trait==='loose';if(t.stage===0){let strength=opening(p.hole),threshold=.56+(tight?.10:0)-(late?.09:0)-(loose?.07:0)+(t.price>t.bb*3?.12:0);if(strength<threshold&&call&&Math.random()>.08)return ['fold'];if(canRaise(t,p)&&strength>threshold+.09&&t.price<=t.bb*3&&Math.random()<.48+ag*.45)return ['raise',Math.round(Math.max(t.price*2.6,t.bb*(late?2.3:3))/100)*100]}
+ if(people[p.id]?.tier>=1&&!broadcast)return masterDecision(t,p,bubble,background);let hard=people[p.id]?.tier===1,a=people[p.id]||people[0],pot=t.ps.reduce((s,q)=>s+q.paid,0),call=Math.min(p.stack,owing(t,p)),price=call/(pot+call||1),late=t.actor===t.btn;let hero=t.ps.find(q=>q.id===-1),read=hero&&hero.seen>6?hero.folds/hero.seen:0;let ag=a.agg+(late?.08:0)+(hard?read*.08:0);let trait=a.trait||traits[p.id],pressure=(trait==='pressure'&&bubble),tight=trait==='tight',loose=trait==='loose';if(t.stage===0){let strength=opening(p.hole),threshold=.56+(tight?.10:0)-(late?.09:0)-(loose?.07:0)+(t.price>t.bb*3?.12:0);if(strength<threshold&&call&&Math.random()>.08)return ['fold'];if(canRaise(t,p)&&strength>threshold+.09&&t.price<=t.bb*3&&Math.random()<.48+ag*.45)return ['raise',Math.round(Math.max(t.price*2.6,t.bb*(late?2.3:3))/100)*100]}
  let eq=equity(t,p,hard,background);
  if(trait==='catch'&&t.stage===3&&price<.22)eq+=.08;if(trait==='trap'&&eq>.82&&t.stage<3&&Math.random()<.34)return ['call'];if(trait==='value'&&t.stage===3&&eq>.59)ag+=.13;if(trait==='control'&&t.stage===2&&eq<.62)ag-=.10;if(trait==='draw'&&t.stage<3&&eq>.34)ag+=.12;if(pressure)ag+=.13;
  let bluff=Math.random()<ag*(late?(trait==='steal'?.24:.15):.065);if(canRaise(t,p)&&(eq>.65-ag*.16||bluff)&&Math.random()<ag+.17){return ['raise',t.price+Math.max(t.raise,Math.round((pot+call)*(.35+ag*.65)/100)*100)]}if(call&&eq+a.loose*.23+(late?.035:0)<price+(bubble&&p.stack>t.bb*5?.06:.015))return ['fold'];return ['call']}
@@ -409,7 +431,14 @@ function observeAction(p,kind,cost,street){
  r.decisions++;if(kind==='raise')r.raises++;
  if(cost>0){r.faced++;if(kind==='fold')r.folded++}
  const line=p.line||={preRaise:false,preCall:false,lastRaise:-1,lastCheck:-1};
- if(kind==='raise'){line.lastRaise=street;if(street===0)line.preRaise=true}
+ if(kind==='raise'){
+   if(street>0){
+     line.betStreets=(line.betStreets||0)|(1<<street);
+     if(cost>0)line.raisedFacingAt=street;
+     if(line.lastCheck===street&&line.lastRaise!==street)line.checkRaisedAt=street;
+   }
+   line.lastRaise=street;if(street===0)line.preRaise=true;
+ }
  if(kind==='call'&&street===0)line.preCall=true;
  if(kind==='check')line.lastCheck=street;
 }
@@ -886,6 +915,50 @@ function handTexture(h,board){
  if(board.length<5&&outs)draw=Math.max(draw,outs&(outs-1)?.23:.105);
  return {draw,blocker,wet:Math.min(.75,wet)};
 }
+// Read only observable actions, the board and this player's hand. A river
+// overbet after two barrels represents a different range from a first stab.
+function expertPressure(t,p,opponents,cost,pot){
+ const rivals=t.ps.filter(q=>q!==p&&!q.fold);
+ let danger=0;
+ for(let i=0;i<rivals.length;i++){
+   const q=rivals[i],line=q.line;
+   if(!cost||q.bet!==t.price||!line||line.lastRaise!==t.stage)continue;
+   const trace=line.betStreets||0;
+   const prior=Number(!!(trace&2)&&t.stage>1)+Number(!!(trace&4)&&t.stage>2);
+   const checkRaise=line.checkRaisedAt===t.stage;
+   const reraised=line.raisedFacingAt===t.stage;
+   const fraction=cost/Math.max(t.bb,pot-cost);
+   const quiet=cap((.27-opponents[i].aggression)*2.3,-.24,.38);
+   danger=Math.max(danger,cap(.08*prior+.17*Number(checkRaise)+.10*Number(reraised)
+     +cap((fraction-.54)*.32,-.09,.27)+quiet*.32+.04*(rivals.length-1),0,.80));
+   opponents[i].range=cap(opponents[i].range+danger*.52,0,.98);
+ }
+ return danger;
+}
+function expertMadeHand(h,board){
+ // Medium pairs and weak top pairs retain showdown value but get few calls
+ // from worse hands. Subtract combinations already made on a paired board.
+ const masks=boardMasks(board),score=simulatedScore(h,masks);
+ const category=Math.floor(score/759375),primary=Math.floor(score/50625)%15;
+ const boardRank=rank(board),boardCategory=Math.floor(boardRank/759375);
+ const boardPrimary=Math.floor(boardRank/50625)%15,secondary=Math.floor(score/3375)%15;
+ if(category===0||score===boardRank)return 0;
+ if(category===boardCategory&&primary===boardPrimary){
+   if(category===1||category===2&&secondary===Math.floor(boardRank/3375)%15)return 0;
+   if(category===3)return 1;
+   if(category===7)return secondary===14?3:1;
+ }
+ if(category>=3||category===2&&!boardCategory)return 3;
+ const rs=h.map(c=>c%13+2);
+ if(category===2){
+   const ownPair=primary===boardPrimary?secondary:primary;
+   const unpaired=board.filter(c=>(c%13+2)!==boardPrimary).map(c=>c%13+2);
+   return ownPair>=Math.max(0,...unpaired)?2:1;
+ }
+ if(primary>masks.high)return 2;
+ if(primary===masks.high&&Math.max(0,...rs.filter(r=>r!==primary))>=11)return 2;
+ return 1;
+}
 function masterDecision(t,p,bubble,background=false){
  const opponents=opponentsFor(t,p),multi=opponents.length,pos=positionScore(t),bb=t.bb;
  const cost=Math.min(owing(t,p),p.stack),pot=t.ps.reduce((s,q)=>s+q.paid,0);
@@ -893,11 +966,14 @@ function masterDecision(t,p,bubble,background=false){
  const effective=Math.min(p.stack,Math.max(...opponents.map(o=>o.stack+Math.max(0,o.bet-p.bet))));
  const spr=effective/Math.max(bb,pot),aggression=people[p.id].agg,trait=people[p.id].trait||traits[p.id];
  const live=opponents.filter(o=>o.stack>0),willFold=live.length?live.reduce((s,o)=>s+o.fold,0)/live.length:0;
+ const top=people[p.id].tier===2;
+ const budget=background?(top?16:12):(top?0:cap(Math.floor(245/(multi*t.boards.length*(t.double?2:1))),18,52));
  const covers=live.length>0&&live.every(o=>p.stack>=o.stack*1.2);
  const payoutRisk=bubble?(covers&&trait==='pressure'?-.025:.035):0;
  const mayRaise=canRaise(t,p);
  function raiseBy(increase){
-   const max=p.bet+p.stack,minimum=Math.min(max,t.price+t.raise);
+   const legalMax=p.bet+p.stack,minimum=Math.min(legalMax,t.price+t.raise);
+   const max=Math.max(minimum,p.bet+effective);
    const target=t.price+Math.max(t.raise,Math.round(increase/Math.max(1,bb/4))*Math.max(1,bb/4));
    return ['raise',cap(target,minimum,max)];
  }
@@ -905,7 +981,8 @@ function masterDecision(t,p,bubble,background=false){
    const quality=rangeGrade(p.hole,[]),raised=t.price>bb;
    const limpers=t.ps.filter(q=>q!==p&&!q.fold&&q.line?.preCall).length;
    const stackBB=(effective+cost)/bb,priceBB=t.price/bb;
-   const cut=.67-pos*.17+(multi>4?.03:0)+payoutRisk-cap(willFold-.42,-.12,.22)*(trait==='steal'?.33:.20);
+   const shortHanded=multi===1?(pos>.75?.105:.045):multi===2?.035:0;
+   const cut=.67-pos*.17-shortHanded+(multi>4?.03:0)+payoutRisk-cap(willFold-.42,-.12,.22)*(trait==='steal'?.33:.20);
    if(!raised){
      if(mayRaise&&quality>=cut){
        if(stackBB<=10&&quality>=cut+.025)return raiseBy(effective+cost);
@@ -914,24 +991,36 @@ function masterDecision(t,p,bubble,background=false){
      if(!cost)return ['call'];
      return quality>=cut-.095&&odds<.22&&limpers>0?['call']:['fold'];
    }
-   const eq=masterEquity(p.hole,t.boards,opponents,background?14:0).share;
-   const premium=.90+(priceBB>8?.045:0)-(stackBB<=12?.09:0);
+   const raises=preflopRaiseCount(t);
+   // A single open can include many steals. Compress the simulated range
+   // after a four-bet or a three-bet from a demonstrably quiet aggressor.
+   const tightThreeBet=raises>=2&&opponents.some(o=>o.bet===t.price&&o.aggression<.20);
+   if(!t.double&&(raises>=3||tightThreeBet))studyPreflopSpot(t,p,opponents);
+   const eq=masterEquity(p.hole,t.boards,opponents,budget).share;
+   const shortOpen=raises===1&&multi<=2&&priceBB<=4.5;
+   const premium=.90-(shortOpen?.09:0)+(priceBB>8?.045:0)+(raises>=3?.025:0)-(stackBB<=12?.09:0);
    const wheelAce=p.hole.some(c=>c%13===12)&&Math.floor(p.hole[0]/13)===Math.floor(p.hole[1]/13)&&quality<.68;
    const blindDefense=t.actor===t.bbSeat||t.actor===t.sbSeat;
    const steal=wheelAce&&(pos>.65||blindDefense)&&priceBB<=3.5&&limpers<=1&&Math.random()<cap(.08+(willFold-.42)*.65,.04,.25);
    if(mayRaise&&(quality>=premium||steal))return raiseBy(stackBB<18||priceBB>stackBB*.24?effective+cost:t.price*(2+(1-pos)*.65));
    const realization=.77+pos*.15+(quality>.80?.07:0)+(t.actor===t.bbSeat&&priceBB<=2.6?.045:0);
-   return cost&&eq*realization<odds+.018+payoutRisk?['fold']:['call'];
+   const reverseImplied=raises>=2&&quality<.79&&effective>bb*18?.038:0;
+   return cost&&eq*realization<odds+.018+payoutRisk+reverseImplied?['fold']:['call'];
  }
- const rollout=masterEquity(p.hole,t.boards,opponents,background?16:0),eq=rollout.share;
+ const danger=expertPressure(t,p,opponents,cost,pot);
+ const rollout=masterEquity(p.hole,t.boards,opponents,budget),eq=rollout.share;
  const texture=t.boards.map(b=>handTexture(p.hole,b));
  const average=key=>texture.reduce((s,q)=>s+q[key],0)/texture.length;
  const draw=average('draw'),blocker=average('blocker'),wet=average('wet'),river=t.stage===3;
  const activeRivals=live.length,heads=multi===1;
- const thin=trait==='value'&&heads&&river&&!cost?.065:0;
+ const made=t.boards.reduce((sum,b)=>sum+expertMadeHand(p.hole,b),0)/t.boards.length;
+ const marginal=made<1.5&&draw<.20;
+ const passive=live.length>0&&live.every(o=>o.aggression<.22);
+ const thin=trait==='value'&&heads&&river&&!cost&&made>=2?.045:0;
  const freeroll=t.double&&rollout.scoop>.24&&eq>.55;
- const goodValue=eq>(heads?.62:.54)+(cost?.08:0)+payoutRisk-thin||(trait==='split'&&freeroll);
- const foldEquity=Math.pow(cap(willFold+.08*pos,.15,.77),activeRivals);
+ const valueFloor=(heads?.62:.55)+(cost?.09:0)+danger*.09+payoutRisk-thin;
+ const goodValue=eq>valueFloor&&(!marginal||eq>(heads?.78:.70))||(trait==='split'&&freeroll);
+ const foldEquity=activeRivals<multi?0:live.reduce((joint,o)=>joint*cap(o.fold+.08*pos,.12,.82),1);
  const blockerBluff=river&&blocker>.50&&eq<.28&&spr>.55;
  const semiBluff=!river&&draw>=.20&&eq>.14&&spr>.55;
  const checkRaise=cost>0&&p.line?.lastCheck===t.stage&&p.line?.lastRaise!==t.stage;
@@ -943,26 +1032,33 @@ function masterDecision(t,p,bubble,background=false){
    const checkChance=cap((initiative?.66:.29)+(wet<.23?.10:-.13)+(trait==='trap'?.10:0)-(multi-1)*.045,.12,.86);
    if((goodValue||semiBluff)&&Math.random()<checkChance)return ['call'];
  }
+ // A free card is worth more than a thin value bet in position with a
+ // middling made hand. Top tier checks back more reliably on later streets.
+ if(!cost&&!oop&&marginal&&eq>.25&&eq<.80){
+   const checkBack=cap((top?.82:.68)+(river?.07:0)+.05*(multi-1)-(passive?.08:0),.58,.97);
+   if(Math.random()<checkBack)return ['call'];
+ }
  if(mayRaise&&checkRaise){
-   const value=eq>(heads?.72:.64)+payoutRisk;
+   const value=eq>(heads?.72:.64)+payoutRisk+danger*.10&&(!marginal||eq>.85);
    const aggressionRead=live.reduce((sum,o)=>sum+o.aggression,0)/Math.max(1,live.length);
    const valueMix=cap(.73+aggressionRead*.37+(wet>.28?.07:0),.7,.96);
    const bluffMix=cap((river?.14:.23)+(willFold-.42)*.40+(trait==='draw'?.055:0)-.08*(multi-1),.025,.4);
-   const candidate=semiBluff||blockerBluff;
+   const candidate=foldEquity>0&&danger<.48&&(semiBluff||blockerBluff);
    if((value&&Math.random()<valueMix)||(!value&&candidate&&Math.random()<bluffMix)){
      const increment=Math.max(cost*(wet>.28?2.35:1.95),(pot+cost)*(river?.69:.53));
      return raiseBy(spr<1.35&&value?effective+cost:increment);
    }
  }
  const deep=trait==='pressure'&&spr>3&&pos>.5;
- const frequency=foldEquity*(.37+aggression*.34+(deep?.12:0))*(cost?.46:1);
+ const frequency=foldEquity*(.37+aggression*.34+(deep?.12:0))*(cost?.46:1)*(1-danger);
  if(mayRaise&&!checkRaise&&(goodValue||((semiBluff||blockerBluff)&&Math.random()<frequency))){
-   const fraction=goodValue?(wet>.32?.76:river?.66:.48):(river?.82:.61);
+   const fraction=goodValue?(marginal?.30:wet>.32?.78:river?.67:heads&&wet<.17?.36:.52):(river?.82:.61);
    return raiseBy(spr<=1.1&&goodValue?effective+cost:(pot+cost)*fraction);
  }
  const realization=river?1:cap(.82+.11*pos+(spr<1?.10:0)-.022*(multi-1),.68,1);
  const read=trait==='catch'&&heads&&river?(opponents[0].aggression-.25)*.12:0;
- const sizeTax=trait==='control'&&cost>eligible*.65?.035:0;
+ const sizeTax=danger*(marginal?(top?.46:.39):made<2.5?.23:.055)
+   +(trait==='control'&&cost>eligible*.65?.035:0);
  if(cost&&eq*realization+draw*.035+read<odds+payoutRisk+sizeTax)return ['fold'];
  return ['call'];
 }
@@ -1025,7 +1121,7 @@ function restoreTournamentClock(game){
  if(previous!==duration)game.elapsed=(game.elapsed||0)*duration/previous;
  game.clockLevelSeconds=duration;
 }
-const START_STACK=50000,REBUY_FEE=60000,REBUY_STACK=60000;
+const START_STACK=50000,REBUY_STACK=60000;
 const cashLevels=[
  {sb:2000,bb:5000,min:200000,max:700000,ante:10000,doubleSb:30000},
  {sb:5000,bb:10000,min:500000,max:2000000,ante:20000,doubleSb:50000}
@@ -1042,8 +1138,23 @@ function cashBuyin(limits=cashLevels[g?.cashLevel??0]){
  return limits.min+10000*Math.floor(Math.random()*((limits.max-limits.min)/10000+1));
 }
 function rebuyCountOf(p){return p.rebuys??(p.re?1:0)}
+function paidTournamentRebuys(game,p){
+ if(Number.isSafeInteger(p.rebuyFees))return p.rebuyFees;
+ // The oldest saves charged the initial buy-in. Use recorded transaction
+ // prices for any known later fixed-price entry if its seat total is absent.
+ const count=rebuyCountOf(p);
+ if(!count||!game.recentRebuys?.length)return count*game.buyin;
+ const known=new Map();
+ for(const e of game.recentRebuys){
+   if(e.id===p.id&&Number.isInteger(e.count)&&e.count>0&&e.count<=count&&Number.isSafeInteger(e.fee))
+     known.set(e.count,e.fee);
+ }
+ let total=(count-known.size)*game.buyin;
+ for(const fee of known.values())total+=fee;
+ return total;
+}
 function entryOpen(t){return !g.cash&&!g.rested&&t.level<=REBUY_LEVEL}
-function canBuyBack(t){return entryOpen(t)&&state.wallet>=REBUY_FEE}
+function canBuyBack(t){return entryOpen(t)&&state.wallet>=g.buyin}
 // Accounting can run at the opening of showdown. Publish seat changes only
 // after results are public, and keep unrevealed events with the saved table.
 let outgoingTournamentEvents=[];
@@ -1064,29 +1175,68 @@ function tournamentEvent(t,p,kind){
  const alreadyOut=g.exits.includes(p.id);
  const change=kind==='eliminated'?(alreadyOut?0:-1):(alreadyOut?1:0);
  event.aliveAfter=g.entrants-g.exits.length+change;
- if(kind==='rebought')event.stack=REBUY_STACK;
+ if(kind==='rebought'){event.stack=REBUY_STACK;event.fee=g.buyin}
  events.push(event);
  if(t.phase==='done')flushTournamentEvents(t);
 }
 function registerRebuy(t,p){
- const entries=tournamentEntryCount(g),previous=rebuyCountOf(p);
+ const entries=tournamentEntryCount(g),previous=rebuyCountOf(p),fee=g.buyin;
  // Earlier saves bought 50,000 chips at the venue's entry fee. Carry prior
  // contributions at the price already paid, including any pending AI rebuy.
  g.rebuyChips=(g.rebuyChips??((entries-g.entrants)*START_STACK))+REBUY_STACK;
- p.rebuyFees=(p.rebuyFees??(previous*g.buyin))+REBUY_FEE;
- g.entryCount=entries+1;p.rebuys=previous+1;p.re=true;g.pool+=prizeContribution(REBUY_FEE);
+ p.rebuyFees=paidTournamentRebuys(g,p)+fee;
+ g.entryCount=entries+1;p.rebuys=previous+1;p.re=true;g.pool+=prizeContribution(fee);
  if(p.id!==-1)p.pendingRebuyStack=REBUY_STACK;
  if(g.prizeTies?.some(ids=>ids.includes(p.id)))
    g.prizeTies=g.prizeTies.map(ids=>ids.filter(id=>id!==p.id)).filter(ids=>ids.length>1);
  const seq=(g.rebuySeq||0)+1;g.rebuySeq=seq;
- const event={seq,id:p.id,name:nameOf(p.id),table:t.number,hand:t.hand,count:p.rebuys,fee:REBUY_FEE,stack:REBUY_STACK};
+ const event={seq,id:p.id,name:nameOf(p.id),table:t.number,hand:t.hand,count:p.rebuys,fee,stack:REBUY_STACK};
  const events=g.recentRebuys??=[];events.push(event);if(events.length>64)events.shift();
  tournamentEvent(t,p,'rebought');
 }
 function cashFund(p,amount){
  p.buyin=amount;p.totalBuyins=(p.totalBuyins||0)+amount;p.stack=amount;
 }
-function completedCashHands(t){return Math.max(0,g.count-(['done','showdown'].includes(t.phase)?0:1))}
+function cashFundingOffer(t){
+ if(!g?.cash||t!==g.ts[0]||t.phase!=='done'||g.stage!=='playing')return null;
+ const p=t.ps.find(p=>p.id===-1),limits=cashLevels[g.cashLevel??0],room=limits.max-p.stack;
+ if(room<=0)return null;
+ const max=Math.min(room,state.wallet),rebuy=p.stack===0;
+ const min=rebuy?limits.min:Math.min(1000,room,state.wallet||1000);
+ return {kind:rebuy?'rebought':'added',stack:p.stack,wallet:state.wallet,cap:limits.max,min,max,
+   available:max>0&&max>=min,token:[g.exitId,t.hand,p.stack,p.totalBuyins??g.buyin,state.wallet].join('/')};
+}
+function addCashFunds(t,p,amount){
+ const kind=p.stack===0?'rebought':'added',prior=p.totalBuyins??p.buyin??g.buyin;
+ if(kind==='rebought')p.buyin=amount;
+ p.totalBuyins=prior+amount;p.stack+=amount;p.lastFundedHand=t.hand;
+ if(!g.exitId)exitQuote();
+ const event={session:g.exitId,seq:g.cashSeq=(g.cashSeq||0)+1,id:p.id,name:p.id===-1?'플레이어':nameOf(p.id),
+   kind,amount,stack:p.stack,hand:t.hand};
+ const events=g.cashEvents??=[];events.push(event);if(events.length>24)events.shift();
+}
+function fundCashOpponents(t){
+ if(t.phase!=='done'||t.cashFundingHand===t.hand)return;
+ t.cashFundingHand=t.hand;
+ const limits=cashLevels[g.cashLevel??0];
+ for(const p of t.ps){
+   if(p.id===-1)continue;
+   if(p.stack===0){addCashFunds(t,p,cashBuyin(limits));continue;}
+   if(p.stack>limits.max*.48||t.hand-(p.lastFundedHand??-5)<4)continue;
+   const chance=p.stack<limits.min*.45?.32:.10;
+   if(Math.random()>=chance)continue;
+   const target=Math.max(p.stack+10000,cashBuyin(limits));
+   addCashFunds(t,p,Math.min(limits.max-p.stack,Math.max(10000,Math.floor((target-p.stack)/10000)*10000)));
+ }
+}
+function buyCashChips(t,c){
+ if(!g?.cash||!t||c.session!==g.exitId||c.hand!==t.hand)return false;
+ const offer=cashFundingOffer(t),amount=c.amount;
+ if(!offer?.available||offer.token!==c.token||!Number.isSafeInteger(amount)||
+     amount<offer.min||amount>offer.max||(amount!==offer.max&&amount%1000!==0))return false;
+ state.wallet-=amount;addCashFunds(t,t.ps.find(p=>p.id===-1),amount);return true;
+}
+function completedCashHands(t){return Math.max(0,g.count-(!t.squeezeSettlementPending&&['done','showdown'].includes(t.phase)?0:1))}
 function washCash(t){
  // Cards have finished deciding ownership before a wash. Award the player's
  // wallet exactly once, including when they exit during a finished showdown.
@@ -1103,7 +1253,7 @@ function washCash(t){
 }
 function cashStats(t,hero){
  const completed=completedCashHands(t),banked=hero.banked||0;
- const retained=['done','showdown'].includes(t.phase)?hero.stack:(hero.start??(hero.stack+hero.paid));
+ const retained=!t.squeezeSettlementPending&&['done','showdown'].includes(t.phase)?hero.stack:(hero.start??(hero.stack+hero.paid));
  return {completed,banked,washCap:cashLevels[g.cashLevel??0].max,net:retained+banked-(hero.totalBuyins??g.buyin),humanBuyin:hero.totalBuyins??g.buyin,
    totalBuyins:t.ps.reduce((s,p)=>s+(p.totalBuyins??g.buyin),0),rake:g.houseRake||0,handRake:t.settlement?.rake||0,
    washedAt:g.washedAt||0,washIn:WASH_INTERVAL-completed%WASH_INTERVAL,lastWash:g.lastWash||null};
@@ -1186,7 +1336,7 @@ function tournamentStats(t,hero){
    paidPlaces,payoutPercentages:percentages,payouts:prizeAmounts(g.pool,percentages),
    prizeContributionRate,prizeContributionPerEntry:prizeContribution(g.buyin),protectedPrizePool:g.protectedPrizePool||0,
    itmDistance,bubble:itmDistance>=1&&itmDistance<=3,inTheMoney:itmDistance===0,
-   rebuyOpen:entryOpen(t),rebuyFee:REBUY_FEE,rebuyStack:REBUY_STACK,rebuyPrizeContribution:prizeContribution(REBUY_FEE),finalRebuyLevel:REBUY_LEVEL,
+   rebuyOpen:entryOpen(t),rebuyFee:g.buyin,rebuyStack:REBUY_STACK,rebuyPrizeContribution:prizeContribution(g.buyin),finalRebuyLevel:REBUY_LEVEL,
    finalRebuyLevelActive:entryOpen(t)&&t.level===REBUY_LEVEL,finalRebuyHand:entryOpen(t)&&t.level===REBUY_LEVEL&&breakDue(),finalRebuyRemaining:Math.max(0,Math.ceil((REBUY_LEVEL+1)*blindLevelSeconds(g.pub)-g.elapsed)),
    heroRebuys:rebuyCountOf(hero),lastRebuy:events[events.length-1]||null,recentRebuys:events};
 }
@@ -1237,7 +1387,7 @@ function dealAt(t){
  if(t===g.ts[0]){
    if(!g.cash&&config.level===REBUY_LEVEL&&!g.rebuyLevelSeen)g.rebuyNoticePending=true;
    else if(config.level!==REBUY_LEVEL)g.rebuyNoticePending=false;
-   g.count++;g.revealed=true;g.timer=ACTION_SECONDS;raiseTo=0;delay=.65;
+   g.count++;g.revealed=!state.opt.squeeze;g.timer=ACTION_SECONDS;raiseTo=0;delay=.65;
    for(let p of t.ps)if(p.id>=0){let h=state.history[p.id]||={n:0,note:''};h.n++}
  }
 }
@@ -1247,7 +1397,8 @@ function newRound(){for(let t of g.ts)dealAt(t);save()}
 function record(t){for(let l of t.lines){if(l.id>=0&&state.history[l.id])state.history[l.id].note=l.text+' · '+(t.wins[l.id]?'팟 획득':'쇼다운')}}
 
 function accountFinished(t){
- if(g.cash){washCash(t);return}
+ if(t.squeezeSettlementPending)return;
+ if(g.cash){washCash(t);if(t.phase==='done'&&t.settlement?.hand===t.hand)fundCashOpponents(t);return}
  if(t.phase==='done'&&t.pendingTournamentEvents?.length)flushTournamentEvents(t);
  if(t.accounted||!['done','showdown'].includes(t.phase))return;
  t.accounted=true;t.reentries=[];
@@ -1433,7 +1584,7 @@ function wrap(rebuyDecision,voiceBusy=false){
  if(g.cash){
    washCash(t);
    if(!hero.stack){cashExit('bust');return}
-   for(let p of t.ps)if(!p.stack)cashFund(p,cashBuyin());
+   fundCashOpponents(t);
    dealAt(t);return;
  }
  for(const u of g.ts)accountFinished(u);
@@ -1441,7 +1592,7 @@ function wrap(rebuyDecision,voiceBusy=false){
    if(rebuyDecision===undefined){g.rebuyAsk=true;return}
    if(rebuyDecision){
      if(!canBuyBack(t)){g.rebuyAsk=true;notice='리바인에 필요한 포인트를 충전해 주세요.';return}
-      state.wallet-=REBUY_FEE;registerRebuy(t,hero);hero.stack=REBUY_STACK;
+      state.wallet-=g.buyin;registerRebuy(t,hero);hero.stack=REBUY_STACK;
       g.exits=g.exits.filter(id=>id!==hero.id);
    }
  }
@@ -1479,7 +1630,8 @@ function dailyResult(hero){
 }
 function exitQuote(){
  const t=g.ts[0],hero=t.ps.find(p=>p.id===-1);
- const settled=t.phase==='done'||t.phase==='showdown';
+ if(t.squeezeSettlementPending)return null;
+ const settled=t.phase==='done'||(t.phase==='showdown'&&!t.squeezeSettlementPending);
  const completed=g.count-(settled?0:1),committed=settled?0:(hero.paid||0),stack=hero.stack;
  let kind='daily',refund=0,place=0,penalty=0,tied=false;
  if(g.cash){
@@ -1489,7 +1641,7 @@ function exitQuote(){
  }else if(settled&&(!stack&&g.exits.includes(-1)||stack>0&&g.entrants-g.exits.length===1)){
    const result=dailyResult(hero);kind='ranked';refund=result.prize;place=result.place;tied=result.tied;
  }
- const fees=g.cash?g.buyin:g.buyin+(hero.rebuyFees??(g.buyin*rebuyCountOf(hero)));
+ const fees=g.cash?(hero.totalBuyins??g.buyin):g.buyin+paidTournamentRebuys(g,hero);
  if(!g.exitId){
    state.visitCount=(state.visitCount||0)+1;
    g.exitId=[g.pub,state.visitCount.toString(36),Date.now().toString(36),Math.floor(Math.random()*1e9).toString(36)].join('-');
@@ -1498,7 +1650,7 @@ function exitQuote(){
  return {kind,completed,committed,stack,fees,place,tied,penalty,refund,banked:hero.banked||0,net:refund+(hero.banked||0)-fees,token};
 }
 function surrender(token){
- if(!g||!token)return;
+ if(!g||!token||g.ts[0].squeezeSettlementPending)return;
  for(const t of g.ts)accountFinished(t);
  const q=exitQuote();
  if(token!==q.token){msg('정산 금액이 바뀌었습니다. 내용을 다시 확인해 주세요.');return}
@@ -1529,22 +1681,25 @@ function finish(text,payout,source='complete'){
 }
 const venueFees=[[50000,100000],[100000,150000,200000]];
 const venueTables=[[2,3,4],[12,24]];
-const tournamentEntries=venueFees.map((fees,pub)=>{
- const formats=venueTables[pub].map(tables=>{
+const mapoLargeFees=[100000,200000,500000];
+function tournamentFees(pub,tables){return pub===1&&tables===24?mapoLargeFees:venueFees[pub]}
+const tournamentEntries=venueTables.map((fields,pub)=>{
+ const formats=fields.map(tables=>{
    const initial=tables*9,payoutPercentages=fieldPercentages(initial);
-   return {tables,initial,offers:fees.map(buyin=>{
+   return {tables,initial,offers:tournamentFees(pub,tables).map(buyin=>{
      const prizeContributionPerEntry=prizeContribution(buyin),pool=initial*prizeContributionPerEntry;
-     return {buyin,pool,prizeContributionRate,prizeContributionPerEntry,paidPlaces:payoutPercentages.length,payoutPercentages,payouts:prizeAmounts(pool,payoutPercentages)};
+     return {buyin,rebuyFee:buyin,rebuyPrizeContribution:prizeContributionPerEntry,pool,prizeContributionRate,prizeContributionPerEntry,paidPlaces:payoutPercentages.length,payoutPercentages,payouts:prizeAmounts(pool,payoutPercentages)};
    })};
  });
- return {pub,...formats[0],formats,levelSeconds:blindLevelSeconds(pub),startStack:START_STACK,rebuyFee:REBUY_FEE,rebuyStack:REBUY_STACK};
+ return {pub,...formats[0],formats,levelSeconds:blindLevelSeconds(pub),startStack:START_STACK,rebuyStack:REBUY_STACK};
 });
 function launch(pub,dbl,stake,seats,tables,cashLevel=0){
  if(g||![0,1,2].includes(pub))return;
- const cash=pub===2,limits=cashLevels[cashLevel],fees=venueFees[pub];
+ const cash=pub===2,limits=cashLevels[cashLevel];
  const tableCount=cash?1:(tables??venueTables[pub][0]);
  if(cash&&(!Number.isInteger(cashLevel)||!limits)){notice='당산 테이블의 블라인드를 선택해 주세요';return}
  if(!cash&&!venueTables[pub].includes(tableCount)){notice='대회의 테이블 수를 선택해 주세요';return}
+ const fees=tournamentFees(pub,tableCount);
  const cost=stake??(cash?limits.min:fees[0]);
  const validFee=cash?cost>=limits.min&&cost<=limits.max:fees.includes(cost);
  if(!Number.isSafeInteger(cost)||!validFee){notice='해당 펍의 바이인을 선택해 주세요';return}
@@ -1668,11 +1823,11 @@ function tableInfo(t,showSeats=true){
  return {number:t.number,nextBlinds:t.nextBlinds||null,finalRebuyHand:entryOpen(t)&&t.level===REBUY_LEVEL&&breakDue(),rebuyOpen:entryOpen(t),incoming:t.inbound?.length||0,seats:t.ps.length,remain:t.ps.filter(p=>!p.fold).length,stage:t.stage,phase:dealing?'dealing':hasShowdownTitle(t)?'showdown':t.phase,hand:t.hand,feed:t.feed,
  pot:t.ps.reduce((a,p)=>a+p.paid,0),actor:actor?nameOf(actor.id):'',isMe:actor?.id===-1,
  time:clock?.left??(actor?.id===-1?(g.timer>0?g.timer:g.bank):0),max:clock?.full??(g.timer>0?ACTION_SECONDS:45),
- players:showSeats?t.ps.map((p,i)=>({id:p.id,...publicSkill(p),name:nameOf(p.id),rebuys:rebuyCountOf(p),buyin:p.buyin??g.buyin,banked:p.banked||0,stack:t.phase==='showdown'&&t.preAward?t.preAward[i]:p.stack,action:p.action,fold:p.fold,active:p===actor})):undefined};
+ players:showSeats?t.ps.map((p,i)=>({id:p.id,...publicSkill(p),name:nameOf(p.id),rebuys:rebuyCountOf(p),buyin:p.buyin??g.buyin,totalBuyins:g.cash?(p.totalBuyins??p.buyin??g.buyin):undefined,banked:p.banked||0,stack:t.phase==='showdown'&&t.preAward?t.preAward[i]:p.stack,action:p.action,fold:p.fold,active:p===actor})):undefined};
 }
 function hasShowdownTitle(t){return t.titleLeft>0&&!(t.curtain>0)}
 function visiblePocket(t,p){
- if(p.id===-1)return p.hole;
+ if(p.id===-1)return g.revealed===false?[]:p.hole;
  if(p.fold||t.curtain>0||t.titleLeft>0)return [];
  return t.open||t.lines?.slice(0,t.reveal).some(l=>l.id===p.id)?p.hole:[];
 }
@@ -1683,6 +1838,10 @@ function visiblePhase(t){
  return t.phase;
 }
 function restorePresentation(t){
+ if(g.cash&&t.phase==='done'){
+   // Cash waits here without ticking. A saved, settled hand has no pending deal.
+   t.beforeStreet=0;t.boardHold=0;t.titleLeft=0;t.curtain=0;t.pocketTurnLeft=0;return;
+ }
  if(Number.isFinite(t.titleLeft))return;
  // Old saves already exposed during a locked runout; resume from those cards.
  // Only an unreached regular river title is still due after its suspense hold.
@@ -1752,6 +1911,10 @@ function step(dt,inspecting,holdTable,voiceBusy=false,clockDt=dt){if(!g)return;
  if(g.rebuyAsk||holdTable)return;
  const titleTiming=t.curtain>0||t.titleLeft>0;
  if(advancePresentation(t,dt)){if(titleTiming)delay=0;return}
+ if(t.squeezeSettlementPending){
+   if(g.revealed!==false)finishSqueezedShowdown(t);
+   return;
+ }
  const hero=t.phase==='bet'&&t.ps[t.actor]?.id===-1;
  if(hero){
   if(t.preFoldHand===t.hand&&foldReservationLive(t,t.ps[t.actor])){
@@ -1773,7 +1936,7 @@ function step(dt,inspecting,holdTable,voiceBusy=false,clockDt=dt){if(!g)return;
  else if(t.phase==='showdown')delay=nextShowdownSeat(t,true);
 }
 const cashierOffers={
- reward:{points:50000,maxWallet:50000},
+ reward:{points:50000,maxWallet:200000},
  packs:[
    {id:'chips20',points:200000,price:2900},
    {id:'chips50',points:500000,price:5900},
@@ -1792,20 +1955,23 @@ function purchasePack(id,sequence){
 }
 function snapshot(includeSideSeats=true){
  if(g)for(const table of g.ts)accountFinished(table);
- let v={study:state.lastStudy||null,cashier:cashierOffers,purchaseSequence:state.purchaseSequence||0,rewardedViews:state.rewardedViews||0,rewardEligible:state.wallet<=cashierOffers.reward.maxWallet,cashLevels,prizeSchedules,prizeContributionRate,tournamentEntries,tournamentResult:state.tournamentResult||null,wallet:state.wallet,opt:state.opt,last:state.last,lastExit:state.lastExit||null,notice,spoken,g:null};if(!g)return v;let t=g.ts[0],hero=t.ps.find(p=>p.id===-1),own=t.phase==='bet'&&!t.boardHold&&t.ps[t.actor]?.id===-1;
+ let v={study:state.lastStudy||null,cashier:cashierOffers,purchaseSequence:state.purchaseSequence||0,rewardedViews:state.rewardedViews||0,rewardEligible:state.wallet<cashierOffers.reward.maxWallet,cashLevels,prizeSchedules,prizeContributionRate,tournamentEntries,tournamentResult:state.tournamentResult||null,wallet:state.wallet,opt:state.opt,last:state.last,lastExit:state.lastExit||null,notice,spoken,g:null};if(!g)return v;let t=g.ts[0],hero=t.ps.find(p=>p.id===-1),own=t.phase==='bet'&&!t.boardHold&&t.ps[t.actor]?.id===-1;
  updateBlindNotices();
  const boundary=afterHand(t);
  const stats=g.cash?null:tournamentStats(t,hero);
  v.g={nextBlinds:t.nextBlinds||null,canPreFold:!!canReserveFold(t,hero),preFold:!!(t.preFoldHand===t.hand&&foldReservationLive(t,hero)),autoNextLeft:boundary?autoNextRemaining(t):null,afterHand:boundary,wagers:t.wagers||[],lastClosed:g.lastClosed||null,exitQuote:exitQuote(),sessionId:g.exitId,settlement:t.phase==='done'?t.settlement||null:null,cashStats:g.cash?cashStats(t,hero):null,tournament:stats,leaders:tournamentLeaders(g),lastTransfer:g.lastTransfer||null,quick:own?quickBets(t,hero):null,announcement:t.announcement?.hand===t.hand?t.announcement:null,beforeStreet:t.beforeStreet||0,boardHold:t.boardHold||0,entrants:g.entrants,capacity:g.capacity,tables:g.ts.map((table,i)=>tableInfo(table,i===0||includeSideSeats)),entries:stats?stats.entries:0,rebuyCount:stats?stats.rebuys:0,payouts:stats?stats.payouts:[],lastHero:t.lastHero?.hand===t.hand?t.lastHero:null,buyin:g.buyin,pub:g.pub,cash:g.cash,double:g.double,hand:g.count,level:t.level,sb:t.sb,bb:t.bb,pool:g.pool,break:g.stage==='break',breakLeft:g.breakLeft,elapsed:g.elapsed,bank:g.bank,rebuy:g.rebuyAsk,left:stats?stats.alive:t.ps.length,ready:t.phase==='done',phase:visiblePhase(t),pocketTurnMs:t.pocketTurnLeft>0?Math.round(1000*(POCKET_TURN_SECONDS-t.pocketTurnLeft)):-1,showdownTitle:hasShowdownTitle(t),showdownTitleMs:hasShowdownTitle(t)?Math.round(1000*(SHOWDOWN_TITLE_SECONDS-t.titleLeft)):0,allInRunout:!!t.allInRunout,street:t.stage,btn:t.btn,actor:t.actor,sbs:t.sbSeat,bbs:t.bbSeat,timer:g.timer,board:t.boards,feed:t.feed,summary:t.summary,pot:t.ps.reduce((s,q)=>s+q.paid,0),reveal:g.revealed,show:t.reveal,own,call:Math.min(hero.stack,owing(t,hero)),min:Math.min(hero.stack+hero.bet,t.price+t.raise),max:hero.stack+hero.bet,raise:own&&canRaise(t,hero),other:g.ts[1]?.feed||'',ranks:g.revealed&&!t.boardHold?t.boards.filter(b=>b.length).map(b=>label(best(hero.hole,b))):[],p:t.ps.map((p,i)=>({id:p.id,...publicSkill(p),name:nameOf(p.id),rebuys:rebuyCountOf(p),buyin:p.buyin??g.buyin,banked:p.banked||0,move:p.move||null,stack:t.phase==='showdown'&&t.preAward?t.preAward[i]:p.stack,bet:p.bet,fold:p.fold,action:p.action,won:t.phase==='done'?(t.wins[p.id]||0):0,spot:t.phase==='showdown'&&t.lines[t.reveal-1]?.id===p.id,hole:visiblePocket(t,p)})),boardWins:t.double&&t.phase==='done'&&t.lines?.length?t.byBoard.map(w=>Object.keys(w).map(k=>nameOf(+k)).join('·')):[]};
  if(g.cash){
    v.g.cashLevel=g.cashLevel??0;
+   v.g.cashFunding=cashFundingOffer(t);
+   v.g.cashEvents=g.cashEvents||[];
+   v.g.cashEvent=v.g.cashEvents[v.g.cashEvents.length-1]||null;
    v.g.ante=g.double?(t.ante??cashLevels[g.cashLevel??0].ante):0;
    // During an upgraded 0.8.0 hand, keep the exact blinds and action order
    // already on the felt. Only a new deal posts the updated single blind.
    v.g.singleBlind=!!t.double&&t.bbSeat===-1;
    v.g.legacyDouble=v.g.singleBlind&&g.cashLevel==null;
    v.g.forcedPosts=t.forcedPosts||null;
- }else{v.g.rebuyFee=REBUY_FEE;v.g.rebuyStack=REBUY_STACK;}
+ }else{v.g.rebuyFee=g.buyin;v.g.rebuyStack=REBUY_STACK;}
  if(g.stage==='finalTable'||g.stage==='headsUp')v.g[g.stage+'Ms']=Math.round(g[g.stage+'Left']*1000);
  if(g.levelAdGate)v.g.levelAd={token:g.levelAdGate.token,level:g.levelAdGate.level,skip:!!g.levelAdGate.restored};
  if(!g.cash){
@@ -1815,7 +1981,11 @@ function snapshot(includeSideSeats=true){
    v.g.levelSecondsRemaining=Math.max(0,Math.ceil((t.level+1)*blindLevelSeconds(g.pub)-g.elapsed));
    v.g.rebuyNoticePending=!!g.rebuyNoticePending&&entryOpen(t)&&t.level===REBUY_LEVEL;
  }
- v.g.study=g.study||null;
+ v.g.heroHoleHidden=g.revealed===false;
+ v.g.canSqueeze=canSqueezeHole(t);
+ v.g.awaitingSqueeze=!!t.squeezeSettlementPending&&v.g.canSqueeze;
+ if(v.g.heroHoleHidden)v.study=null;
+ v.g.study=v.g.heroHoleHidden?null:g.study||null;
  v.g.equity=showdownEquity(v.g);
  return v;
 }
@@ -1872,7 +2042,7 @@ function venueCards(){
 }
 function restoreActiveGame(){
  if(!g)return;
- g.revealed=true;g.buyin=g.buyin||50000;
+ g.revealed??=true;g.buyin=g.buyin||50000;
  g.entrants??=g.cash?g.ts[0].ps.length:16;
  g.capacity??=g.cash?g.entrants:Math.min(9,g.entrants/2);
  g.ts.forEach((u,i)=>{
@@ -1904,32 +2074,40 @@ function saveSession(){
  state.g=g;
  return JSON.stringify(state);
 }
-const ATTENDANCE_POINTS=10000;
+const ATTENDANCE_POINTS=10000, ATTENDANCE_PERIOD=5, ATTENDANCE_BONUS=200000;
 let pendingAttendance=null;
 function attendanceOffer(){
  const day=Math.floor((Date.now()+9*3600000)/86400000);
- return {day,points:ATTENDANCE_POINTS,available:day>(state.attendanceDay||0)};
+ const lastDay=state.attendanceDay||0,available=day>lastDay;
+ // Older saves record just the most recently claimed day, so it counts as one visit.
+ const previous=Number.isSafeInteger(state.attendanceStreak)&&state.attendanceStreak>0?state.attendanceStreak:1;
+ const streak=available?(day===lastDay+1?previous+1:1):previous;
+ const cycleDay=(streak-1)%ATTENDANCE_PERIOD+1;
+ const points=cycleDay===ATTENDANCE_PERIOD?ATTENDANCE_BONUS:ATTENDANCE_POINTS;
+ return {day,streak,cycleDay,points,available};
 }
 // The native rules worker commits this proposed whole session before confirming the reward.
 // A process restart between commit and confirmation reads the day and wallet from the same record.
 function prepareAttendance(day){
- const offer=attendanceOffer(),wallet=state.wallet+ATTENDANCE_POINTS;
+ const offer=attendanceOffer(),wallet=state.wallet+offer.points;
  pendingAttendance=null;
  if(!offer.available||day!==offer.day||!Number.isSafeInteger(wallet))return '{}';
- pendingAttendance={day,wallet};
- return JSON.stringify({session:JSON.stringify({...state,g,attendanceDay:day,wallet})});
+ pendingAttendance={day,streak:offer.streak,cycleDay:offer.cycleDay,points:offer.points,wallet};
+ return JSON.stringify({session:JSON.stringify({...state,g,attendanceDay:day,attendanceStreak:offer.streak,wallet})});
 }
 function mobile(raw){let c=JSON.parse(raw),t=g?.ts[0],preFoldConsumed=false,venueChange='';notice='';spoken='';
  if(c.op==='liveGuide'){
    const p=t?.ps[t.actor];
-   if(!p||p.id!==-1||t.phase!=='bet'||t.boardHold||g.exitId!==c.session||g.count!==c.hand||
+   if(!p||p.id!==-1||g.revealed===false||t.phase!=='bet'||t.boardHold||g.exitId!==c.session||g.count!==c.hand||
       t.stage!==c.street||Math.min(owing(t,p),p.stack)!==c.call||t.ps.reduce((n,q)=>n+q.paid,0)!==c.pot)return '{}';
    return JSON.stringify(liveStudyGuide(t,p));
  }
  if(c.op==='prepareAttendance')return prepareAttendance(c.day);
- let attendancePaid=false;
- if(c.op==='confirmAttendance'&&pendingAttendance?.day===c.day&&state.wallet+ATTENDANCE_POINTS===pendingAttendance.wallet){
-   state.attendanceDay=c.day;state.wallet=pendingAttendance.wallet;attendancePaid=true;
+ let attendanceReceipt=null;
+ if(c.op==='confirmAttendance'&&pendingAttendance&&pendingAttendance.day===c.day&&state.wallet+pendingAttendance.points===pendingAttendance.wallet){
+   const {day,streak,cycleDay,points,wallet}=pendingAttendance;
+   state.attendanceDay=day;state.attendanceStreak=streak;state.wallet=wallet;
+   attendanceReceipt={day,points,streak,cycleDay};
  }
  pendingAttendance=null;
  if(c.op==='init'){outgoingTournamentEvents=[];tournamentTitleStarted='';levelAdsEnabled=c.levelAds===true;}
@@ -1939,23 +2117,36 @@ function mobile(raw){let c=JSON.parse(raw),t=g?.ts[0],preFoldConsumed=false,venu
    g.rebuyLevelSeen=true;g.rebuyNoticePending=false;
  }
  if(c.session!=null&&c.session!==g?.exitId&&['parkVenue','step','act','next','re','skip','leave','peek','prefold'].includes(c.op))c.op='stale';
+ let cashFundingResult;
  switch(c.op){
+ case 'cashAddOn':cashFundingResult=buyCashChips(t,c);break;
  case 'init':if(c.data)loadSession(c.data);break;
  case 'save':return saveSession();
  case 'roster':return JSON.stringify(people.map(p=>({...p,history:state.history[p.id]||{n:0,note:''}})));
  case 'parkVenue':if(g&&c.session===g.exitId){parkGame();venueChange='parked';}break;
  case 'enter':case 'resumeVenue':venueChange=enterVenue(c);break;
- case 'step':preFoldConsumed=step(Math.max(0,Math.min(.8,c.dt)),c.inspect===true,c.holdTable===true,c.voiceBusy===true,Number.isFinite(c.clockDt)?Math.max(0,c.clockDt):Math.max(0,Math.min(.8,c.dt)))===true;break;case 'prefold':updateFoldReservation(t,c);break;case 'peek':if(g)g.revealed=true;break;case 'act':if((c.session==null||c.session===g?.exitId)&&(c.hand==null||c.hand===g?.count)&&t?.phase==='bet'&&!t.boardHold&&t.ps[t.actor].id===-1&&['fold','call','raise','quarter','half','pot','allin'].includes(c.kind)){
+ case 'step':preFoldConsumed=step(Math.max(0,Math.min(.8,c.dt)),c.inspect===true,c.holdTable===true,c.voiceBusy===true,Number.isFinite(c.clockDt)?Math.max(0,c.clockDt):Math.max(0,Math.min(.8,c.dt)))===true;break;case 'prefold':updateFoldReservation(t,c);break;case 'revealHole':
+   if(t&&c.session===g.exitId&&c.hand===g.count&&canSqueezeHole(t))revealHeroHole(t);
+   break;
+ case 'peek':break;case 'act':if((c.session==null||c.session===g?.exitId)&&(c.hand==null||c.hand===g?.count)&&t?.phase==='bet'&&!t.boardHold&&t.ps[t.actor].id===-1&&['fold','call','raise','quarter','half','pot','allin'].includes(c.kind)){
  let key=c.kind,p=t.ps[t.actor],preset=quickBets(t,p)[key];
  if(preset&&!preset.enabled)break;
  let kind=preset?(key==='allin'&&owing(t,p)>=p.stack?'call':'raise'):key;
  let total=preset&&key!=='raise'?preset.target:(c.amount||0);
- if(!act(t,kind,total,preset?key:undefined))break;t.preFoldHand=null;g.timer=ACTION_SECONDS;delay=t.phase==='showdown'?1.82:.7}break;case 'next':if(t?.phase==='done'&&!g.rebuyAsk&&g.stage==='playing'&&(c.hand==null||c.hand===g.count))wrap(undefined,c.voiceBusy===true);break;case 're':if(g?.rebuyAsk)wrap(c.yes,c.voiceBusy===true);break;case 'skip':if(g?.stage==='break')resumeTournamentBreak(c.voiceBusy===true);break;case 'surrender':surrender(c.token);break;case 'leave':if(g?.cash&&g.count>=6&&t.phase==='done')cashExit('cashSettled');break;case 'purchasePack':purchasePack(c.id,c.sequence);break;case 'day':if(!g&&!state.parked.some(Boolean)&&state.wallet===0)state.wallet=50000;break;case 'option':if(c.name==='speed')state.opt.speed=state.opt.speed===1?2:1;else if(['sound','voice','timing','peek'].includes(c.name))state.opt[c.name]=!state.opt[c.name];break}
+ if(!act(t,kind,total,preset?key:undefined))break;t.preFoldHand=null;g.timer=ACTION_SECONDS;delay=t.phase==='showdown'?1.82:.7}break;case 'next':if(t?.phase==='done'&&!g.rebuyAsk&&g.stage==='playing'&&(c.hand==null||c.hand===g.count))wrap(undefined,c.voiceBusy===true);break;case 're':if(g?.rebuyAsk)wrap(c.yes,c.voiceBusy===true);break;case 'skip':if(g?.stage==='break')resumeTournamentBreak(c.voiceBusy===true);break;case 'surrender':surrender(c.token);break;case 'leave':if(g?.cash&&g.count>=6&&t.phase==='done')cashExit('cashSettled');break;case 'purchasePack':purchasePack(c.id,c.sequence);break;case 'day':if(!g&&!state.parked.some(Boolean)&&state.wallet===0)state.wallet=50000;break;case 'option':
+   if(c.name==='squeeze'){
+     // The current hand keeps the reveal state assigned when it was dealt.
+     state.opt.squeeze=!state.opt.squeeze;
+     break;
+   }
+   if(c.name==='speed')state.opt.speed=state.opt.speed===1?2:1;else if(['sound','voice','timing','peek'].includes(c.name))state.opt[c.name]=!state.opt[c.name];break}
  const rewardApplied=(c.op==='init'||c.op==='rewardedAd')&&applyRewardedAds(c.completedAds);
  const view=snapshot(c.op!=='step'||c.inspect===true||!g||g.entrants<=36);
  view.sessions=venueCards();
+ if(cashFundingResult!==undefined)view.cashFundingApplied=cashFundingResult;
  if(venueChange)view.venueChange=venueChange;
  if(t&&!g&&view.tournamentResult&&['step','next','re','surrender'].includes(c.op))view.tournamentFinished=true;if(rewardApplied)view.rewardApplied=true;if(preFoldConsumed)view.preFoldConsumed=true;view.tournamentEvents=outgoingTournamentEvents;outgoingTournamentEvents=[];
- view.attendance=attendanceOffer();if(attendancePaid)view.attendancePaid=true;
+ view.attendance=attendanceOffer();
+ if(attendanceReceipt){view.attendancePaid=true;view.attendanceReceipt=attendanceReceipt;}
  if(tournamentTitleStarted){view[tournamentTitleStarted+'Started']=true;tournamentTitleStarted='';}
  return JSON.stringify(view)}

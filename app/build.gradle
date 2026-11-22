@@ -49,8 +49,8 @@ android {
         applicationId 'kr.mangwon.holdem'
         minSdk 26
         targetSdk 36
-        versionCode 21
-        versionName '0.8.4'
+        versionCode 22
+        versionName '0.8.5'
     }
 }
 dependencies {
@@ -68,3 +68,42 @@ dependencies {
         releaseImplementation consent
     }
 }
+
+// The dealer's name bank and game announcements are heard back-to-back during a hand.
+// Check the individual recording batches too: a pack's top-level label can hide a mixed voice.
+def verifyReleaseDealer = tasks.register('verifyReleaseDealer') {
+    def assetDir = file('src/main/assets')
+    def banks = ['dealer-names-ko','dealer-voice-en']
+    inputs.files(['dealer-voice/source.json','dealer-voice/index.json'].collect { new File(assetDir,it) })
+    inputs.files(banks.collectMany { base -> ['json','ogg'].collect { new File(assetDir,base+'.'+it) } })
+    doLast {
+        def json = new groovy.json.JsonSlurper()
+        def original = json.parse(new File(assetDir,'dealer-voice/source.json'))
+        if (original.voiceId != 'Veda' || original.model != 'gemini-3.8-flash-tts') {
+            throw new GradleException('The original dealer recording metadata does not identify the expected Veda voice.')
+        }
+        def originalIndex = json.parse(new File(assetDir,'dealer-voice/index.json'))
+        def koreanNames = originalIndex.keySet().findAll { it.startsWith('name:') } as Set
+        for (def base in banks) {
+            def bank = json.parse(new File(assetDir,base+'.json'))
+            def korean = base == 'dealer-names-ko'
+            if (bank.voice != original.voiceId || !bank.sources || bank.sources.any {
+                it.voice != original.voiceId || (korean && it.model != original.model)
+            }) {
+                throw new GradleException("Dealer voice mismatch in recording batches: ${base}")
+            }
+            def encoded = new File(assetDir,base+'.ogg')
+            def digest = java.security.MessageDigest.getInstance('SHA-256').digest(encoded.bytes).encodeHex().toString()
+            if (bank.sha256 != digest || !bank.clips.containsKey('cash:added') ||
+                bank.clips.values().any { it.size() < 2 || it[0] < 0 || it[1] <= 0 || it[0]+it[1] > encoded.length() }) {
+                throw new GradleException("Dealer recordings are incomplete or damaged: ${base}")
+            }
+            def names = bank.clips.keySet().findAll { it.startsWith('name:') } as Set
+            if (korean) koreanNames.addAll(names)
+            else if (names != koreanNames || names.size() != 267 || !bank.clips.containsKey('tournament:rebought')) {
+                throw new GradleException('Both dealer tracks must name all 266 opponents and the player.')
+            }
+        }
+    }
+}
+tasks.matching { it.name == 'preReleaseBuild' }.configureEach { dependsOn(verifyReleaseDealer) }

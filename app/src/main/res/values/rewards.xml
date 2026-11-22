@@ -1,0 +1,19 @@
+<resources>
+    <string name="daily_open">Check in</string>
+    <string name="daily_collected_short">Checked in</string>
+    <string name="daily_streak">Day %1$d in a row</string>
+    <string name="daily_title">Daily check-in</string>
+    <string name="daily_collected">Reward collected</string>
+    <string name="daily_slot">Day %1$d</string>
+    <string name="daily_cycle_note">Every 5th day pays 200,000 P. A missed day restarts the streak.</string>
+    <string name="daily_wallet">My wallet   %1$s P</string>
+    <string name="daily_claim">Collect %1$s P</string>
+    <string name="daily_collecting">Collecting…</string>
+    <string name="daily_later">Later</string>
+    <string name="daily_close">Done</string>
+    <string name="daily_stamp">PAID</string>
+    <string name="daily_error">Couldn’t save your check-in. Please try again.</string>
+    <string name="reward_watch_points">Watch a rewarded ad   +%1$s P</string>
+    <string name="reward_wallet_rule">Available when your wallet is below %1$s P.</string>
+    <string name="reward_over_limit">Balance too high</string>
+</resources>

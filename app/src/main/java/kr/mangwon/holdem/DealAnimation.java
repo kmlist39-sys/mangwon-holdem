@@ -26,6 +26,7 @@ final class DealAnimation {
     boolean running(){return seats>0&&elapsed<end();}
     void update(long now, boolean playing){
         long step=Math.max(0,Math.min(64,now-lastFrame));
+        view.holeSqueeze.update(now,playing);
         if(playing&&!running()&&view.held.equals("peek")){
             peekReach=Math.min(1,peekReach+step/170f);
             peekLift=Math.min(.22f,view.peel/500f+.1f);
@@ -75,9 +76,9 @@ final class DealAnimation {
             float width=30+((mine?61:Arena.POCKET_WIDTH)-30)*travel,height=43+((mine?83:Arena.POCKET_HEIGHT)-43)*travel;
             if(arc>.02f){view.reset((int)(55*arc)<<24);view.c.drawOval(x-width*.6f,y+height*.24f+arc*16,x+width*.57f,y+height*.46f+arc*16,view.p);}
             float turn=clamp((age-FLIGHT)/TURN);
-            boolean front=mine&&turn>=.5f;
+            boolean masked=mine&&view.holeSqueeze.covers(),front=mine&&!masked&&turn>=.5f;
             float squeeze=1;
-            if(mine){
+            if(mine&&!masked){
                 float flip=(float)Math.cos(turn*Math.PI);
                 squeeze=Math.max(.035f,Math.abs(flip));
                 y-=6*(float)Math.sin(turn*Math.PI);
@@ -87,10 +88,16 @@ final class DealAnimation {
                     if(cards==3){tilt*=1-.5f*peekReach;y-=peekReach;}else y-=8*peekReach;
                 }
             }
-            view.c.save();view.c.scale(squeeze,1,x,y);view.card(mine?hole.optInt(lap):0,x-width/2,y-height/2,width,height,tilt,!front);
+            view.c.save();view.c.scale(squeeze,1,x,y);
+            if(masked)view.holeSqueeze.card(hole==null?-1:hole.optInt(lap,-1),x-width/2,y-height/2,width,height,tilt,lap,cards);
+            else view.card(mine?hole.optInt(lap):0,x-width/2,y-height/2,width,height,tilt,!front);
             view.c.restore();
         }
-        if(!running()&&!players.optJSONObject(hero).optBoolean("fold")){
+        boolean folded=players.optJSONObject(hero).optBoolean("fold");
+        int heroOrder=(hero-button-1+seats)%seats;
+        boolean landed=elapsed>=WINDUP+((cards-1)*seats+heroOrder)*interval+FLIGHT;
+        view.holeSqueeze.controls(landed,folded,cards);
+        if(!running()&&!folded&&!view.holeSqueeze.covers()){
             if(peekReach>0){
                 float reach=TitleSequence.smooth(peekReach);
                 float tipX=FoldMotion.startX(true,540,cards-1,cards)+17+(1-reach)*28;

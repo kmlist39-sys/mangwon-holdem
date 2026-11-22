@@ -96,7 +96,7 @@ final class StudyBilling {
         return client != null && client.isReady() && checked && !checking && !active && !pending
             && !buying && product != null && !offerToken.isEmpty();
     }
-    String displayPrice() { return price.isEmpty() ? "월 2,900원 · 한국 기준" : "월 " + price; }
+    String displayPrice() { return price.isEmpty()?"월 2,900원 · 한국 기준":(GameLanguage.english(host)?price+" / month":"월 "+price); }
     String status() {
         if (BuildConfig.DEBUG) return "테스트 APK에서는 실시간 가이드가 무료로 켜져 있습니다.";
         if (pending) return "결제 대기 중 · Google Play 승인 후 이용할 수 있습니다.";

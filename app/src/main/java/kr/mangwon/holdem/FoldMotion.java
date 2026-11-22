@@ -8,11 +8,12 @@ final class FoldMotion {
     private final Arena a;
     private final boolean[] hadBadge=new boolean[CastArt.COUNT+1];
     private final Pose pose=new Pose();
+    private boolean heroFoldedUnseen;
 
     FoldMotion(Arena arena){a=arena;}
 
     void observe(JSONObject old,JSONObject game,long now,boolean newHand){
-        if(newHand)return; // Folded seats in a restored snapshot are already at rest.
+        if(newHand){heroFoldedUnseen=false;return;} // Folded seats in a restored snapshot are already at rest.
         JSONArray before=old.optJSONArray("p"),after=game.optJSONArray("p");
         for(int i=0;i<Math.min(before.length(),after.length());i++){
             JSONObject prev=before.optJSONObject(i),next=after.optJSONObject(i);
@@ -20,6 +21,7 @@ final class FoldMotion {
             if(id!=prev.optInt("id")||!next.optBoolean("fold")||prev.optBoolean("fold"))continue;
             a.foldStarted[id+1]=now;
             hadBadge[id+1]=!prev.optString("action").isEmpty();
+            if(id==-1)heroFoldedUnseen=old.optBoolean("heroHoleHidden")||prev.optJSONArray("hole")==null||prev.optJSONArray("hole").length()==0;
         }
     }
 
@@ -116,7 +118,7 @@ final class FoldMotion {
             if(alpha==0)continue;
             for(int i=0;i<count;i++){
                 sample(pose,mine,x,y,badge,i,count,ms);
-                float turn=mine?range(ms,110,290):1;
+                float turn=mine&&!heroFoldedUnseen?range(ms,110,290):1;
                 a.c.save();a.c.translate(pose.x,pose.y);a.c.rotate(pose.angle);
                 if(turn<1)a.c.scale(Math.max(.045f,Math.abs((float)Math.cos(turn*Math.PI))),1);
                 if(turn<.5f){

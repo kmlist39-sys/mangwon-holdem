@@ -26,7 +26,12 @@ final class PrivacyPolicy {
         }
         int margin = Math.round(20 * activity.getResources().getDisplayMetrics().density);
         TextView text = new TextView(activity);
-        text.setText(content.toString().trim());
+        boolean english=GameLanguage.english(activity);
+        String body=content.toString().trim();
+        int split=body.indexOf("Mangwon-dong Hold’em Privacy Policy");
+        if(split>=0)body=(english?body.substring(split):body.substring(0,split)).trim();
+        else if(english&&body.startsWith("개인정보처리방침을 열 수 없습니다"))body="Privacy policy unavailable. Contact kmlist39@gmail.com.";
+        text.setText(body);
         text.setTextSize(16);
         text.setLineSpacing(0, 1.14f);
         text.setTextIsSelectable(true);
@@ -34,9 +39,9 @@ final class PrivacyPolicy {
         ScrollView scroll = new ScrollView(activity);
         scroll.addView(text);
         new AlertDialog.Builder(activity)
-            .setTitle("개인정보처리방침 · Privacy Policy")
+            .setTitle(english?"Privacy Policy":"개인정보처리방침")
             .setView(scroll)
-            .setPositiveButton("닫기", null)
+            .setPositiveButton(english?"Close":"닫기", null)
             .show();
     }
 }

@@ -28,7 +28,9 @@ final class DealerVoice {
     private int seenHand=-1,seenAction=-1,titleHand=-1,generation;
     private String settlementId="";
     private boolean observed,held,dual,enabled,previewing;
-    private boolean tournamentQueue;
+    private boolean tournamentQueue,cashEntryQueue;
+    private String cashSession="";
+    private long lastCashSeq;
 
     DealerVoice(GameActivity activity){this.activity=activity;bank=new GeminiBank(activity);}
     boolean ready(){return bank.ready();}
@@ -54,18 +56,19 @@ final class DealerVoice {
         JSONObject game=snapshot.optJSONObject("g"),opts=snapshot.optJSONObject("opt");
         String switched=snapshot.optString("venueChange");
         if("parked".equals(switched)||"resumed".equals(switched)){
-            stop();observed=false;seenHand=-1;seenAction=-1;titleHand=-1;settlementId="";
+            stop();observed=false;seenHand=-1;seenAction=-1;titleHand=-1;settlementId="";cashSession="";
         }
         boolean voiceOn=activity.active&&opts!=null&&opts.optBoolean("voice",true);
         JSONArray events=snapshot.optJSONArray("tournamentEvents");
         if(game==null){
+            cashSession="";
             if(observed&&voiceOn&&seenHand!=-1&&ready())addTournamentEvents(events);
             if(tournamentQueue&&voiceOn)playNext();
             else if(!previewing)stop();
             observed=true;seenHand=-1;seenAction=-1;titleHand=-1;settlementId="";return;
         }
         int hand=game.optInt("hand");
-        if(seenHand!=hand&&held&&!tournamentQueue)stop();
+        if(seenHand!=hand&&held&&!tournamentQueue&&!cashEntryQueue)stop();
         dual=game.optBoolean("double");
         boolean title=game.optBoolean("showdownTitle");
         JSONObject action=game.optJSONObject("announcement"),result=game.optJSONObject("settlement");
@@ -73,11 +76,12 @@ final class DealerVoice {
         String resultId=result==null?"":game.optString("sessionId")+"/"+hand+"/"+result.optInt("hand",hand);
         enabled=activity.arena.screen.equals("table")&&voiceOn;
         if(!enabled&&!previewing)stop();
-        if(observed&&enabled&&ready()){
+        boolean play=observed&&enabled&&ready();
+        if(play){
             if(snapshot.optBoolean("finalTableStarted"))add(new DealerLine("파이널 테이블입니다.","final-table"));
             if(snapshot.optBoolean("headsUpStarted"))add(new DealerLine("해즈업!!!","heads-up"));
             if(action!=null&&action.optInt("hand",hand)==hand&&(seenHand!=hand||seq!=seenAction)){
-                String kind=action.optString("kind");add(new DealerLine(OutcomeAnnouncement.action(kind),"full".equals(kind)?"pot":kind));
+                add(actionLine(game,action));
             }
             if(title&&titleHand!=hand&&add(new DealerLine("쇼다운!","showdown")))hold();
             if(result!=null&&!resultId.equals(settlementId)){
@@ -85,11 +89,52 @@ final class DealerVoice {
                 boolean any=false;for(DealerLine line:lines)if(add(line))any=true;if(any)hold();
             }
             addTournamentEvents(events);
-            playNext();
         }
+        observeCashEntries(game,play);
+        if(play)playNext();
         if(title)titleHand=hand;
         if(result!=null)settlementId=resultId;
         observed=true;seenHand=hand;seenAction=seq;
+    }
+    private void observeCashEntries(JSONObject game,boolean play){
+        String session=game.optString("sessionId");
+        boolean same=!session.isEmpty()&&session.equals(cashSession);
+        if(!same){cashSession=session;lastCashSeq=0;}
+        JSONArray events=game.optJSONArray("cashEvents");
+        if(events!=null&&events.length()>0){
+            JSONObject last=events.optJSONObject(events.length()-1);
+            if(last!=null&&cashSession.equals(last.optString("session"))&&last.optLong("seq")<=lastCashSeq)return;
+            for(int i=0;i<events.length();i++)observeCashEntry(events.optJSONObject(i),play&&same);
+        }else observeCashEntry(game.optJSONObject("cashEvent"),play&&same);
+    }
+    private void observeCashEntry(JSONObject event,boolean play){
+        if(event==null||cashSession.isEmpty()||!cashSession.equals(event.optString("session")))return;
+        long seq=event.optLong("seq",0);
+        if(seq<=lastCashSeq)return;
+        lastCashSeq=seq;
+        if(!play||event.optInt("id",-1)<0||event.optLong("amount")<=0)return;
+        String name=event.optString("name"),kind=event.optString("kind");
+        if(name.isEmpty()||!("added".equals(kind)||"rebought".equals(kind)))return;
+        boolean added="added".equals(kind);
+        DealerLine line=new DealerLine(OutcomeAnnouncement.person(name)+", "+(added?"애드온하셨습니다.":"리바인하셨습니다."),
+            "name:"+name,added?"cash:added":"tournament:rebought");
+        if(add(line))cashEntryQueue=true;
+    }
+    static DealerLine actionLine(JSONObject game,JSONObject action){
+        String kind=action.optString("kind"),text=OutcomeAnnouncement.action(kind);
+        String cue="full".equals(kind)?"pot":kind;
+        int actor=action.optInt("id",-1);
+        JSONArray seats=game.optJSONArray("p");
+        if(actor>=0&&seats!=null&&!text.isEmpty()){
+            for(int i=0;i<seats.length();i++){
+                JSONObject seat=seats.optJSONObject(i);
+                if(seat==null||seat.optInt("id",-1)!=actor)continue;
+                String name=seat.optString("name");
+                if(!name.isEmpty())return new DealerLine(OutcomeAnnouncement.person(name)+", "+text,"name:"+name,cue);
+                break;
+            }
+        }
+        return new DealerLine(text,cue);
     }
     private void addTournamentEvents(JSONArray events){
         if(events==null)return;
@@ -192,7 +237,7 @@ final class DealerVoice {
     }
     private void finishQueue(){
         if(activity.music!=null)activity.music.setDucked(false);
-        held=false;previewing=false;tournamentQueue=false;activity.talkingUntil=0;
+        held=false;previewing=false;tournamentQueue=false;cashEntryQueue=false;activity.talkingUntil=0;
     }
     void stop(){
         generation++;pending.clear();recorded.clear();ui.removeCallbacksAndMessages(null);

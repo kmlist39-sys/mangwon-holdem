@@ -16,7 +16,7 @@ final class LiveCoach {
     LiveCoach(Arena arena){a=arena;}
 
     private boolean eligible(){
-        return a.host.studyBilling.unlocked()&&a.g!=null&&a.g.optBoolean("own")
+        return a.host.studyBilling.unlocked()&&a.g!=null&&!a.g.optBoolean("heroHoleHidden")&&a.g.optBoolean("own")
             &&a.screen.equals("table")&&!a.deal.running()&&a.g.optString("phase").equals("bet");
     }
 
@@ -80,7 +80,7 @@ final class LiveCoach {
     private void detail(String passive,String aggressive){
         a.box(264,132,672,380,9,0xfc172a22);a.stroke(264,132,672,380,9,0xffa38b62,1.4f);
         a.hit(264,132,672,380,"coachPanel");
-        a.text("현재 핸드 · "+advice.optString("position"),281,158,19,a.paper,a.title,Paint.Align.LEFT);
+        a.stage.bet.fitted("현재 핸드 · "+advice.optString("position"),281,158,305,19,a.paper,Paint.Align.LEFT);
         a.brass("닫기",595,139,66,"liveCoach");
         a.line(281,170,651,170,0xff74694f,1);
         a.txt("현재 팟 "+a.fmt(pot)+"   ·   "+(call>0?"콜 비용 "+a.fmt(call):"체크 가능"),282,191,15,a.paper);
@@ -92,9 +92,9 @@ final class LiveCoach {
             "총 "+a.fmt(advice.optLong("raiseTo")),advice.optInt("raise"),y+21);
         a.line(281,290,651,290,0xff645d47,1);
         a.stage.bet.fitted(advice.optString("title"),282,309,367,15,a.gold,Paint.Align.LEFT);
-        a.wrapped(advice.optString("reason"),282,328,366,12,a.paper,2);
+        a.wrapped(advice.optString("reason"),282,a.en?322:328,366,a.en?11:12,a.paper,a.en?3:2);
         String note=advice.optLong("eligible")<pot&&call>0?"참여 가능 팟 "+a.fmt(advice.optLong("eligible"))+" 기준":"공개 액션과 상대 범위를 바탕으로 계산";
-        a.txt("학습용 추정 빈도 · "+note,282,369,11,a.muted);
+        a.stage.bet.fitted("학습용 추정 빈도 · "+note,282,369,365,11,a.muted,Paint.Align.LEFT);
     }
     private void option(String name,String amount,int percent,int y){
         text(name,282,y,14,a.paper,Paint.Align.LEFT);a.txt(amount,380,y,13,a.muted);

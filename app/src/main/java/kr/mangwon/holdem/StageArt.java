@@ -19,7 +19,7 @@ final class StageArt {
     StageArt(Arena arena){
         a=arena;buttons=a.image("controls.png");trim=a.image("trim.png");
         opponents=new OpponentHands(this);
-        showdown=a.image("showdown.png");hands=a.image("gestures.png");props=a.image("ambience.png");bartender=a.image("bartender.png");title=new TitleSequence(this);bet=new BetArt(this);place=new VenueScene(a);chips=new ChipMotion(this);rebuys=new RebuyEntrance(this);
+        showdown=a.image(a.en?"showdown-en.webp":"showdown.png");hands=a.image("gestures.png");props=a.image("ambience.png");bartender=a.image("bartender.png");title=new TitleSequence(this);bet=new BetArt(this);place=new VenueScene(a);chips=new ChipMotion(this);rebuys=new RebuyEntrance(this);
     }
     void tile(Bitmap b,int columns,int rows,int i,float l,float t,float r,float d){
         tileAlpha(b,columns,rows,i,l,t,r,d,255);
@@ -195,33 +195,37 @@ final class StageArt {
         for(int slot=0;slot<4&&start+slot<tableCount;slot++){
             int index=tableOrder[start+slot];JSONObject t=ts.optJSONObject(index);
             int number=t.optInt("number",index+1),incoming=t.optInt("incoming");
-            String count=t.optInt("seats")+(incoming>0?"+"+incoming:"")+"명";
+            String count=t.optInt("seats")+(incoming>0?"+"+incoming:"")+(a.en?" seated":"명");
             if(tableCount>2){
                 float x=42+(slot%2)*104,y=400+(slot/2)*18;
-                bet.fitted(number+"번 "+count,x,y,48,11.7f,a.gold,Paint.Align.LEFT);
+                bet.fitted(a.en?"T"+number+" · "+count:number+"번 "+count,x,y,48,11.7f,a.gold,Paint.Align.LEFT);
                 bet.fitted(t.optString("phase").equals("done")?"정산":street(t),x+52,y,44,11.7f,a.paper,Paint.Align.LEFT);
             }else{
                 float y=tableCount==1?409:399+slot*19;
                 boolean last=tableCount==1&&!a.g.optBoolean("cash");
-                String label=(last?"파이널 ":"")+number+"번";
+                String label=a.en?(last?"Final":"T"+number):(last?"파이널 ":"")+number+"번";
                 bet.fitted(label+" "+count,43,y,62,12.1f,a.gold,Paint.Align.LEFT);
                 bet.fitted(street(t),108,y,52,12.1f,a.paper,Paint.Align.LEFT);
                 String who=t.optString("actor");
-                bet.fitted(who.isEmpty()?"팟 "+a.fmt(t.optInt("pot")):who+" 차례",165,y,78,12.1f,who.isEmpty()?a.muted:a.paper,Paint.Align.LEFT);
+                bet.fitted(who.isEmpty()?"팟 "+a.fmt(t.optInt("pot")):(a.en?a.tr(who):who+" 차례"),165,y,78,12.1f,who.isEmpty()?a.muted:a.paper,Paint.Align.LEFT);
             }
         }
         a.c.restore();a.hit(13,372,275,436,"tables");
     }
     void turnNotice(String label,float x,float centerY,boolean own){
+        label=a.tr(label);
         final float size=own?15.5f:14;
         a.reset(a.paper);a.p.setTypeface(a.title);a.p.setTextSize(size);
-        float span=Math.min(166,Math.max(76,a.p.measureText(label)+33));
+        float textWidth=a.p.measureText(label);
+        float span=Math.min(166,Math.max(76,textWidth+33));
         bet.part(bet.plaque,.012f,.15f,.988f,.86f,x-span/2,centerY-13,x+span/2,centerY+13,own?255:215);
-        a.text(label,x,centerY+size*.34f,size,own?0xfff6dfae:0xffddd8c5,a.title,Paint.Align.CENTER);
+        a.text(label,x,centerY+size*.34f,Math.min(size,size*(span-15)/Math.max(1,textWidth)),own?0xfff6dfae:0xffddd8c5,a.title,Paint.Align.CENTER);
     }
     void nextHandButton(){
         if(a.g.isNull("autoNextLeft")){
-            a.key("다음 핸드  ›",856,445,200,53,"next",1);return;
+            JSONObject offer=a.g.optJSONObject("cashFunding");
+            boolean busted=offer!=null&&"rebought".equals(offer.optString("kind"));
+            a.key(busted?(a.en?"Leave table":"자리 종료"):"다음 핸드  ›",856,445,200,53,"next",busted?0:1);return;
         }
         String action=a.g.optString("afterHand");
         String label=action.equals("rebuy")?"리바인 선택":action.equals("result")?"대회 결과":action.equals("break")?"휴식 시작":"다음 핸드";

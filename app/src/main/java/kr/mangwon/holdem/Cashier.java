@@ -14,6 +14,7 @@ final class Cashier {
     private int selection;
     private long pendingPurchase;
     Cashier(Arena arena){a=arena;rack=a.image("cashier-rack.jpg");}
+    void drawRack(float x,float y,float right,float bottom){a.photo(rack,x,y,right,bottom);}
 
     private JSONObject catalogue(){return a.snapshot.optJSONObject("cashier");}
     private JSONObject product(int index){
@@ -81,13 +82,17 @@ final class Cashier {
         RewardAdDesk ads=a.host.rewardAds;
         boolean eligible=a.snapshot.optBoolean("rewardEligible");
         boolean canWatch=eligible&&ads.enabled()&&rewardEligible();
-        String limit=a.shortP(reward.optInt("maxWallet"))+" P 이하";
+        boolean korean="ko".equals(a.getResources().getConfiguration().getLocales().get(0).getLanguage());
+        int threshold=reward.optInt("maxWallet"),points=reward.optInt("points");
+        String limit=korean&&threshold%10000==0?threshold/10000+"만":a.fmt(threshold);
+        String amount=korean&&points%10000==0?points/10000+"만":a.fmt(points);
         a.line(137,428,943,428,0xff6c6349,1);
-        a.txt("광고 시청 보상   +"+a.shortP(reward.optInt("points"))+" P",139,451,17,a.gold);
-        a.txt("지갑 잔액 "+limit+"일 때 이용",139,472,14,a.muted);
-        if(eligible)a.text(ads.caption(),742,459,13,a.muted,a.normal,Paint.Align.RIGHT);
+        a.txt(a.getResources().getString(R.string.reward_watch_points,amount),139,451,17,a.gold);
+        a.stage.bet.fitted(a.getResources().getString(R.string.reward_wallet_rule,limit),139,473,420,14,a.muted,Paint.Align.LEFT);
+        if(eligible)a.stage.bet.fitted(ads.caption(),742,460,186,12,a.muted,Paint.Align.RIGHT);
         a.stage.plate(756,435,946,476,canWatch?1:0);
-        a.mid(eligible?ads.button():"잔액 조건 미충족",851,460,15,canWatch?a.ink:a.muted);
+        String button=eligible?ads.button():a.getResources().getString(R.string.reward_over_limit);
+        a.stage.bet.fitted(button,851,461,165,15,canWatch?a.ink:a.muted,Paint.Align.CENTER);
         if(canWatch)a.hit(750,429,952,481,"rewardAd");
     }
     private void detail(){

@@ -21,9 +21,6 @@ final class SeatActing {
          1,1,1,1,1,1,1,1,1,-1
     };
     private final Arena a;
-    private Bitmap regrets,thoughts;
-    private volatile boolean expressionsReady;
-    private boolean loading;
     private final Portrait[] cast=new Portrait[CastArt.COUNT];
     private final boolean[] seated=new boolean[CastArt.COUNT];
     private final int[] action=new int[CastArt.COUNT];
@@ -38,24 +35,6 @@ final class SeatActing {
         a=arena;
     }
 
-    private void prepareExpressions(){
-        if(loading)return;
-        loading=true;
-        Thread thread=new Thread(()->{
-            regrets=validSheet(a.image("seat-fold.webp"));
-            thoughts=validSheet(a.image("seat-think.webp"));
-            expressionsReady=true;
-            a.postInvalidate();
-        },"SeatedCastArt");
-        thread.setPriority(Thread.MIN_PRIORITY);thread.start();
-    }
-
-    private static Bitmap validSheet(Bitmap image){
-        if(image==null||image.getWidth()<500||image.getHeight()<250)return null;
-        float aspect=(float)image.getWidth()/image.getHeight();
-        return Math.abs(aspect-2)<.12f?image:null;
-    }
-
     void clear(){
         Arrays.fill(cast,null);Arrays.fill(acted,0);lastSeq=-1;
     }
@@ -63,7 +42,6 @@ final class SeatActing {
     void observe(JSONObject game,long now,boolean newHand){
         JSONArray players=game.optJSONArray("p");
         if(players==null)return;
-        prepareExpressions();
         if(newHand){
             Arrays.fill(acted,0);Arrays.fill(action,REST);Arrays.fill(seated,false);
             for(int i=0;i<players.length();i++){
@@ -74,8 +52,8 @@ final class SeatActing {
                 if(!seated[id])cast[id]=null;
                 else if(cast[id]==null){
                     int cell=id<CastArt.ORIGINAL?a.artMap[id]:-1;
-                    Bitmap bitmap=cell<0?a.castArt.portrait(id):cut(a.busts,cell);
-                    if(bitmap!=null)cast[id]=new Portrait(cell,bitmap);
+                    Bitmap bitmap=a.castArt.portrait(id);
+                    if(bitmap!=null)cast[id]=new Portrait(cell,bitmap,a.castArt.portrait(id,true));
                 }
                 if(cast[id]!=null)cast[id].resetFocus();
             }
@@ -93,13 +71,6 @@ final class SeatActing {
             }
         }
         lastSeq=seq;
-    }
-
-    private static Bitmap cut(Bitmap sheet,int cell){
-        if(sheet==null)return null;
-        int col=cell%10,row=cell/10;
-        int x=col*sheet.getWidth()/10,y=row*sheet.getHeight()/5;
-        return Bitmap.createBitmap(sheet,x,y,(col+1)*sheet.getWidth()/10-x,(row+1)*sheet.getHeight()/5-y);
     }
 
     private static float ease(float value,float start,float end){
@@ -123,16 +94,13 @@ final class SeatActing {
         long foldTime=a.foldStarted[id+1];
         float foldAge=folded&&foldTime>0?(float)(a.now-foldTime):5000;
         float since=acted[id]>0?(float)(a.now-acted[id]):5000;
-        if(expressionsReady){
-            if(folded)person.prepareFold(regrets);
-            else if(active)person.prepareThought(thoughts);
-        }
         int kind=action[id];
         boolean paying=!folded&&(kind==CALL||kind==RAISE)&&since<1050;
-        float think=person.focus(active&&!folded&&expressionsReady,paying,a.now,motion);
+        float think=person.focus(active&&!folded,paying,a.now,motion);
         float seatDepth=Arena.frontWing(x)?1:Arena.endSeat(x)?.74f:Math.min(.46f,Math.abs(x-540)/680);
         int inward=x<540?1:-1;
-        boolean flipped=seatDepth>.55f&&person.facing!=inward;
+        // The fifth and sixth seats on the nine-handed rear rail also face the center.
+        boolean flipped=(x>540||seatDepth>.55f)&&person.facing!=inward;
         int localInward=flipped?-inward:inward;
         float cycle=3340+id*383%1975;
         double wave=(a.now-a.born+id*347)%((long)cycle)*(2*Math.PI/cycle);
@@ -179,8 +147,8 @@ final class SeatActing {
         c.translate(x+(flipped?width:-width)*.5f,y-size);
         c.scale(flipped?-width:width,size+5);
         paint.setColorFilter(folded?Arena.FOLD_TONES[Math.round(16*a.foldFade(id))]:null);
-        float foldPose=person.fold!=null&&folded?(motion?ease(foldAge,80,245):1):0;
-        person.render(c,paint,person.think==null?0:think,foldPose);
+        float foldPose=person.fold!=null&&folded?(motion?ease(foldAge,65,225):1):0;
+        person.render(c,paint,foldPose);
         c.restore();
     }
 
@@ -191,10 +159,8 @@ final class SeatActing {
         static {for(int y=0;y<=ROWS;y++)for(int x=0;x<=COLS;x++){
             int k=y*(COLS+1)+x;U[k]=x/(float)COLS;V[k]=y/(float)ROWS;
         }}
-        final int cell,facing;
-        final Bitmap idle;
-        Bitmap fold,think;
-        private boolean foldChecked,thinkChecked;
+        final int facing;
+        final Bitmap idle,fold;
         private static final int RELAX=0,ATTEND=1,HOLD=2;
         private int focusMode=RELAX;
         private float focusFrom,focusTo;
@@ -202,8 +168,8 @@ final class SeatActing {
         private final float[] mesh=new float[N*2],heads=new float[N],shoulders=new float[N],
             wrists=new float[N],elbows=new float[N],brows=new float[N],mouths=new float[N],yaw=new float[N];
 
-        Portrait(int frame,Bitmap neutral){
-            cell=frame;facing=frame<0?1:FACING[frame];idle=neutral;
+        Portrait(int frame,Bitmap neutral,Bitmap folded){
+            facing=frame<0?1:FACING[frame];idle=neutral;fold=folded;
             // Skin centroid anchors the rig to each haircut and face, including the older cast.
             int count=0;float tx=0,ty=0;
             for(int iy=3;iy<=11;iy++)for(int ix=4;ix<=16;ix++){
@@ -243,27 +209,6 @@ final class SeatActing {
             return animate?value:focusTo;
         }
 
-        void prepareFold(Bitmap sheet){
-            if(foldChecked||cell<0)return;
-            foldChecked=true;
-            Bitmap b=cut(sheet,cell);
-            fold=hasInk(b)?b:null;
-        }
-
-        void prepareThought(Bitmap sheet){
-            if(thinkChecked||cell<0)return;
-            thinkChecked=true;
-            Bitmap b=cut(sheet,cell);
-            think=hasInk(b)?b:null;
-        }
-
-        private static boolean hasInk(Bitmap b){
-            if(b==null)return false;
-            for(int y=2;y<9;y+=2)for(int x=2;x<9;x+=2)
-                if((b.getPixel(x*(b.getWidth()-1)/10,y*(b.getHeight()-1)/10)>>>24)>100)return true;
-            return false;
-        }
-
         private static float bell(float x,float y,float cx,float cy,float rx,float ry){
             float dx=(x-cx)/rx,dy=(y-cy)/ry,f=Math.max(0,1-dx*dx-dy*dy);
             return f*f*(3-2*f);
@@ -280,20 +225,17 @@ final class SeatActing {
             }
         }
 
-        void render(Canvas c,Paint paint,float attention,float folded){
+        void render(Canvas c,Paint paint,float folded){
             int foldAlpha=Math.round(255*folded);
-            int thinkAlpha=Math.round((255-foldAlpha)*attention);
-            int idleAlpha=255-foldAlpha-thinkAlpha;
-            if(idleAlpha==255||thinkAlpha==255||foldAlpha==255){
-                draw(c,idleAlpha==255?idle:thinkAlpha==255?think:fold,paint,255);
+            if(foldAlpha==0||foldAlpha==255){
+                draw(c,foldAlpha==0?idle:fold,paint,255);
                 return;
             }
             // Add premultiplied contributions inside one transparent seat-sized layer.
             // The two matching opaque cheeks stay opaque even midway through a change.
             c.saveLayer(-.13f,-.13f,1.13f,1.13f,null);
             paint.setXfermode(ADD);
-            draw(c,idle,paint,idleAlpha);
-            draw(c,think,paint,thinkAlpha);
+            draw(c,idle,paint,255-foldAlpha);
             draw(c,fold,paint,foldAlpha);
             paint.setXfermode(null);
             c.restore();

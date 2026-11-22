@@ -120,9 +120,9 @@ final class PubDisplay {
         a.line(479,108,479,379,0xff35434f,1);
         metric("생존 / 시작 인원",alive+" / "+t.optInt("initial"),506,114);
         metric("총 엔트리",String.valueOf(t.optInt("entries")),714,114);
-        metric("리바인",String.valueOf(t.optInt("rebuys")),888,114);
+        metric(a.en?"Rebuys":"리바인",String.valueOf(t.optInt("rebuys")),888,114);
         a.line(506,186,1017,186,0xff35434f,1);
-        a.text("머니인 · 상위 "+t.optInt("paidPlaces")+"명",506,218,19,MINT,a.bold,Paint.Align.LEFT);
+        a.text(a.en?"Top "+t.optInt("paidPlaces")+" paid":"머니인 · 상위 "+t.optInt("paidPlaces")+"명",506,218,19,MINT,a.bold,Paint.Align.LEFT);
         a.text("총상금  "+a.fmt(t.optLong("pool"))+" P",1017,218,20,AMBER,a.nums,Paint.Align.RIGHT);
         prizeRows(t,506,1017,249,25,WHITE,AMBER,GREY,false);
         a.line(506,338,1017,338,0xff35434f,1);
@@ -135,7 +135,7 @@ final class PubDisplay {
             JSONObject player=leaders.optJSONObject(i);
             if(player==null)continue;
             float x=60+i*137;
-            a.txt(player.optInt("rank")+"위 "+player.optString("name"),x,440,15,i==0?AMBER:WHITE);
+            a.stage.bet.fitted(player.optInt("rank")+"위 "+player.optString("name"),x,440,132,15,i==0?AMBER:WHITE,Paint.Align.LEFT);
             a.text(player.optString("display"),x,463,17,WHITE,a.nums,Paint.Align.LEFT);
         }
         a.line(479,405,479,469,0xff35434f,1);
@@ -148,10 +148,10 @@ final class PubDisplay {
             int idx=a.stage.tableOrder[i];
             JSONObject table=a.stage.tablesData().optJSONObject(idx);
             float x=506+(row%2)*264,y=440+(row/2)*23;
-            String name=a.stage.tableCount==1?"파이널":table.optInt("number")+"번";
-            if(idx==a.stage.heroTable)name+=" · 내 자리";
-            a.txt(name,x,y,15,idx==a.stage.heroTable?AMBER:GREY);
-            a.text(table.optInt("seats")+"명  ·  "+a.stage.street(table),x+247,y,15,WHITE,a.normal,Paint.Align.RIGHT);
+            String name=a.stage.tableCount==1?"파이널":a.en?"Table "+table.optInt("number"):table.optInt("number")+"번";
+            if(idx==a.stage.heroTable)name+=a.en?" · You":" · 내 자리";
+            a.stage.bet.fitted(name,x,y,111,15,idx==a.stage.heroTable?AMBER:GREY,Paint.Align.LEFT);
+            a.stage.bet.fitted(table.optInt("seats")+"명  ·  "+a.stage.street(table),x+247,y,130,15,WHITE,Paint.Align.RIGHT);
         }
     }
     private void metric(String label,String value,float x,float y){
@@ -164,18 +164,18 @@ final class PubDisplay {
         JSONArray posts=a.g.optJSONArray("forcedPosts");
         a.txt("이름",61,166,15,GREY);
         if(posts!=null)a.txt("시작 납부",161,166,15,GREY);
-        a.txt("바이인",259,166,15,GREY);a.txt("현재 스택",391,166,15,GREY);
+        a.stage.bet.fitted(a.en?"Total buy-in":"누적 바이인",314,166,78,15,GREY,Paint.Align.RIGHT);a.txt("현재 스택",391,166,15,GREY);
         JSONArray ps=table.optJSONArray("players");
         for(int i=0;ps!=null&&i<ps.length();i++){
             JSONObject p=ps.optJSONObject(i);float y=198+i*27;
             int color=p.optBoolean("active")?AMBER:WHITE;
-            a.txt(p.optString("name"),61,y,17,color);
+            a.stage.bet.fitted(p.optString("name"),61,y,posts!=null?94:180,17,color,Paint.Align.LEFT);
             if(posts!=null){
                 JSONObject post=posts.optJSONObject(i);
                 if(post!=null&&post.optInt("id") == p.optInt("id"))
                     a.text(a.fmt(post.optInt("ante")+post.optInt("blind")),231,y,15,a.gold,a.nums,Paint.Align.RIGHT);
             }
-            a.text(a.fmt(p.optInt("buyin")),314,y,17,WHITE,a.nums,Paint.Align.RIGHT);
+            a.text(a.fmt(p.optLong("totalBuyins",p.optLong("buyin"))),314,y,17,WHITE,a.nums,Paint.Align.RIGHT);
             a.text(a.fmt(p.optInt("stack")),466,y,17,color,a.nums,Paint.Align.RIGHT);
             if(p.optInt("id")>=0)a.hit(56,y-21,469,y+5,"person"+p.optInt("id"));
         }
@@ -190,7 +190,13 @@ final class PubDisplay {
         cashLine("내 누적 손익",(net>0?"+":"")+a.fmt(net)+" P",359);
         cashLine("이번 핸드",a.cashBlindLabel(),397);
         a.line(58,430,1018,430,0xff41505d,1);
-        a.txt("30핸드마다 "+a.fmt(stats.optInt("washCap",700000))+" P를 초과한 보유 칩을 지갑으로 옮깁니다.",61,463,15,GREY);
+        JSONObject last=a.g.optJSONObject("cashEvent");
+        a.txt("30핸드마다 "+a.fmt(stats.optInt("washCap",700000))+" P를 초과한 보유 칩을 지갑으로 옮깁니다.",61,last==null?463:453,15,GREY);
+        if(last!=null){
+            String who=last.optInt("id")==-1?(a.en?"You":"나"):a.tr(last.optString("name"));
+            String action="rebought".equals(last.optString("kind"))?(a.en?"Rebuy":"리바인"):(a.en?"Add-on":"애드온");
+            a.txt((a.en?"Hand ":"핸드 ")+last.optInt("hand")+"   ·   "+who+"   ·   "+action+"   +"+a.fmt(last.optLong("amount"))+" P",61,480,15,AMBER);
+        }
     }
     private void cashLine(String label,String value,float y){
         a.txt(label,535,y,16,GREY);a.text(value,1009,y,18,WHITE,a.nums,Paint.Align.RIGHT);
@@ -201,7 +207,7 @@ final class PubDisplay {
         for(int slot=start;slot<Math.min(start+2,s.tableCount);slot++){
             int idx=s.tableOrder[slot];JSONObject table=s.tablesData().optJSONObject(idx);
             float x=61+(slot-start)*492;
-            a.txt("테이블 "+table.optInt("number")+(idx==s.heroTable?"   ·   내 자리":""),x,121,22,AMBER);
+            a.txt((a.en?"Table ":"테이블 ")+table.optInt("number")+(idx==s.heroTable?"   ·   내 자리":""),x,121,22,AMBER);
             a.txt(s.street(table)+"   ·   "+table.optInt("seats")+"명   ·   팟 "+a.fmt(table.optInt("pot")),x,149,15,GREY);
             a.txt("이름",x,179,13,MINT);a.txt("보유 칩",x+158,179,13,MINT);a.txt("리바인",x+286,179,13,MINT);
             JSONArray ps=table.optJSONArray("players");
@@ -210,7 +216,7 @@ final class PubDisplay {
                 int color=p.optBoolean("fold")?GREY:WHITE;
                 a.txt(p.optString("name"),x,y,16,color);
                 a.text(a.fmt(p.optInt("stack")),x+223,y,16,color,a.nums,Paint.Align.RIGHT);
-                a.txt(p.optInt("rebuys")+"회",x+290,y,14,GREY);
+                a.txt(p.optInt("rebuys")+(a.en?"":"회"),x+290,y,14,GREY);
                 if(p.optBoolean("active"))a.txt("결정 중",x+367,y,14,AMBER);
                 else if(p.optBoolean("fold"))a.txt("폴드",x+367,y,14,GREY);
                 if(p.optInt("id")>=0)a.hit(x-4,y-18,x+414,y+5,"person"+p.optInt("id"));

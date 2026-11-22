@@ -36,7 +36,7 @@ public final class GameActivity extends Activity {
         sounds=new SoundPool.Builder().setMaxStreams(6).setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_GAME).build()).build();
         sounds.setOnLoadCompleteListener((pool,id,status)->{if(status==0)ready.add(id);});
         try{JSONObject durations=new JSONObject(new String(bytes("sounds.json"),"UTF-8"));Iterator<String> it=durations.keys();while(it.hasNext()){String key=it.next();try(AssetFileDescriptor fd=getAssets().openFd("sfx/"+key+".wav")){soundIds.put(key,sounds.load(fd,1));lengths.put(key,durations.optInt(key));}}}catch(Exception e){android.util.Log.e("Mangwon","Audio assets",e);}
-        worker.post(()->{try{boot(bytes("club.js"));JSONObject state=new JSONObject(call(args("op","init","data",getPreferences(0).getString("session",""),"completedAds",getPreferences(0).getLong("completedAds",0),"levelAds",dailyAd.enabled()).toString()));if(state.optBoolean("rewardApplied"))persist();JSONArray people=new JSONArray(call("{\"op\":\"roster\"}"));ui.post(()->{if(isDestroyed())return;arena.people=people;present(state);loaded=true;arena.intro.ready();lastTick=SystemClock.uptimeMillis();rewardAds.start();});}catch(Exception e){android.util.Log.e("Mangwon","Startup",e);}});
+        worker.post(()->{try{boot(bytes("club.js"));JSONObject state=new JSONObject(call(args("op","init","data",getPreferences(0).getString("session",""),"completedAds",getPreferences(0).getLong("completedAds",0),"levelAds",dailyAd.enabled()).toString()));JSONObject restored=state.optJSONObject("g");if(state.optBoolean("rewardApplied")||restored!=null&&restored.optBoolean("cash")&&restored.optBoolean("ready"))persist();JSONArray people=new JSONArray(call("{\"op\":\"roster\"}"));ui.post(()->{if(isDestroyed())return;arena.people=people;present(state);loaded=true;arena.intro.ready();lastTick=SystemClock.uptimeMillis();rewardAds.start();});}catch(Exception e){android.util.Log.e("Mangwon","Startup",e);}});
     }
     boolean persist(){return getPreferences(0).edit().putString("session",call("{\"op\":\"save\"}")).commit();}
     void attendanceStatus(){
@@ -92,18 +92,20 @@ public final class GameActivity extends Activity {
         worker.post(()->{
             try{
                 boolean changesVenue=op.equals("parkVenue")||op.equals("resumeVenue")||op.equals("enter");
-                String checkpoint=changesVenue?call("{\"op\":\"save\"}"):null;
+                boolean cashFunding=op.equals("cashAddOn");
+                String checkpoint=changesVenue||cashFunding?call("{\"op\":\"save\"}"):null;
                 JSONObject state=new JSONObject(call(j.toString()));
                 long now=SystemClock.uptimeMillis();
                 JSONObject game=state.optJSONObject("g"),gate=game==null?null:game.optJSONObject("levelAd");
                 if(!tick||gate!=null||state.optBoolean("preFoldConsumed")||state.optBoolean("finalTableStarted")||state.optBoolean("headsUpStarted")||state.optBoolean("tournamentFinished")||cashWaitsForInput(game,state.optJSONObject("opt"))||now-lastSave>=2500){
                     if(!persist()){
-                        if(changesVenue){
+                        if(changesVenue||cashFunding){
                             android.content.SharedPreferences prefs=getPreferences(0);
                             prefs.edit().putString("session",checkpoint).apply();
                             JSONObject before=new JSONObject(call(args("op","init","data",checkpoint,
                                 "completedAds",prefs.getLong("completedAds",0),"levelAds",dailyAd.enabled()).toString()));
-                            before.put("venueChange",op.equals("parkVenue")?"parkFailed":"denied");
+                            if(cashFunding)before.put("cashFundingApplied",false);
+                            else before.put("venueChange",op.equals("parkVenue")?"parkFailed":"denied");
                             before.put("notice","자리를 저장하지 못했습니다. 다시 시도해 주세요.");
                             ui.post(()->{if(!isDestroyed())present(before);});return;
                         }

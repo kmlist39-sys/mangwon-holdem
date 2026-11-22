@@ -33,7 +33,7 @@ final class ShowdownOdds {
 
     private static void draw(Arena a, JSONObject player, float x, float plateTop, boolean hero) {
         JSONObject equity=a.g.optJSONObject("equity");
-        if (equity==null || player.optBoolean("fold") || a.deal.running()
+        if (equity==null || a.g.optBoolean("heroHoleHidden") || player.optBoolean("fold") || a.deal.running()
             || a.g.optBoolean("showdownTitle") || a.g.optInt("pocketTurnMs",-1)>=0
             || "suspense".equals(a.g.optString("phase"))) return;
         boolean both=a.g.optBoolean("double");
@@ -70,13 +70,14 @@ final class ShowdownOdds {
             row(a,center-half+6,center+half-6,top+15,"위",first,GOLD);
             row(a,center-half+6,center+half-6,top+29,"아래",second,JADE);
         } else if (estimate) {
-            a.text("추정 승률",center,top+14,10.5f,GOLD,a.bold,Paint.Align.CENTER);
+            a.text(a.en?"Est. equity":"추정 승률",center,top+14,10.5f,GOLD,a.bold,Paint.Align.CENTER);
             a.text(first,center,top+28,13,IVORY,a.nums,Paint.Align.CENTER);
         } else row(a,center-half+6,center+half-6,top+16,"승률",first,GOLD);
     }
 
     private static void row(Arena a, float left, float right, float baseline, String label, String value, int tint) {
         a.p.setTypeface(a.bold); a.p.setTextSize(10.5f);
+        label=a.en?(label.equals("승률")?"Win":label.equals("추정 승률")?"Est. win":label.equals("위")?"Top":"Low"):label;
         float space=right-left-a.p.measureText(label)-2;
         a.p.setTypeface(a.nums); a.p.setTextSize(12.8f);
         float font=12.8f*Math.min(1,space/a.p.measureText(value));

@@ -1,0 +1,19 @@
+<resources>
+    <string name="daily_open">출석 받기</string>
+    <string name="daily_collected_short">출석 완료</string>
+    <string name="daily_streak">연속 %1$d일째</string>
+    <string name="daily_title">오늘의 출석 보상</string>
+    <string name="daily_collected">출석 보상 수령 완료</string>
+    <string name="daily_slot">%1$d일차</string>
+    <string name="daily_cycle_note">5일 연속마다 20만 P를 받아요. 하루 쉬면 1일차부터 시작해요.</string>
+    <string name="daily_wallet">내 지갑   %1$s P</string>
+    <string name="daily_claim">%1$s P 받기</string>
+    <string name="daily_collecting">받는 중</string>
+    <string name="daily_later">나중에</string>
+    <string name="daily_close">확인</string>
+    <string name="daily_stamp">수 령</string>
+    <string name="daily_error">출석을 저장하지 못했습니다. 다시 눌러 주세요.</string>
+    <string name="reward_watch_points">광고 시청 보상   +%1$s P</string>
+    <string name="reward_wallet_rule">지갑 잔액이 %1$s P 미만일 때 이용할 수 있어요.</string>
+    <string name="reward_over_limit">잔액 조건 미충족</string>
+</resources>

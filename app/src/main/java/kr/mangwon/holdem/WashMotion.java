@@ -84,7 +84,7 @@ final class WashMotion {
         arena.p.setTextAlign(Paint.Align.CENTER);
         arena.p.setColor((Math.round(255*opacity)<<24) | 0x00f7d69b);
         arena.p.setShadowLayer(2, 0, 1, (Math.round(225*opacity)<<24) | 0x00101815);
-        arena.c.drawText(caption, WALLET_X, baseline, arena.p);
+        arena.c.drawText(arena.tr(caption), WALLET_X, baseline, arena.p);
         arena.p.clearShadowLayer();
     }
 }

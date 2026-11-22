@@ -47,6 +47,7 @@ final class LobbyIntro {
         new int[]{0x00fff7d4,0x0ef8d79c,0x9bfff0c1,0x0ef8d79c,0x00fff7d4},
         new float[]{0,.32f,.5f,.68f,1},Shader.TileMode.CLAMP);
     private Bitmap street, pedestrian, title, entryPlate;
+    private Bitmap lowerEnglishWord;
     private boolean pending, playing, swallowUp, sounded, reducedMotion, pressed, canStartOnRelease;
     private int requestNumber;
     private long lastFrame, playhead, exitAt=-1;
@@ -83,7 +84,8 @@ final class LobbyIntro {
         Thread loader = new Thread(() -> {
             Bitmap scene = a.image("opening-street.webp");
             Bitmap figure = a.image("opening-passerby.webp");
-            Bitmap wordmark = a.image("opening-title.webp");
+            Bitmap wordmark = a.image(a.en?"opening-top-en.webp":"opening-title.webp");
+            Bitmap lower = a.en?a.image("opening-base-en.webp"):null;
             Bitmap plate = a.image("opening-entry.webp");
             if (scene != null) scene.prepareToDraw();
             if (figure != null) figure.prepareToDraw();
@@ -93,7 +95,7 @@ final class LobbyIntro {
                 if (scene == null || wordmark == null) { finish(); return; }
                 street = scene;
                 pedestrian = figure;
-                title = wordmark;
+                title = wordmark; lowerEnglishWord=lower;
                 entryPlate = plate;
                 pending = false;
                 playing = true;
@@ -289,7 +291,11 @@ final class LobbyIntro {
         c.translate(x,y); c.scale(size,size);
         boolean glint=!reducedMotion && ms>=2300 && ms<3070;
         int layer=glint?c.saveLayer(-24,-22,TITLE_WIDTH+30,TITLE_HEIGHT+24,null):0;
-        for (int i=0;i<LETTERS.length;i++) drawLetter(c,i,ms);
+        if(a.en){
+            float topIn=ease(ms,1060,1640),baseIn=ease(ms,1300,2030);
+            if(title!=null)bitmap(c,title,null,0,155+(1-topIn)*42,TITLE_WIDTH,204,(int)(255*topIn));
+            if(lowerEnglishWord!=null)bitmap(c,lowerEnglishWord,null,0,365+(1-baseIn)*50,TITLE_WIDTH,225,(int)(255*baseIn));
+        }else for(int i=0;i<LETTERS.length;i++)drawLetter(c,i,ms);
         if (glint) {
             float sweep=mix(-115,TITLE_WIDTH+116,ease(ms,2300,3070));
             c.save(); c.translate(sweep,0);
@@ -306,15 +312,15 @@ final class LobbyIntro {
         letters.setTypeface(a.title);
         float textSize=h*.045f;
         letters.setTextSize(textSize);
-        float measured=letters.measureText(Arena.LOBBY_SLOGAN);
+        float measured=letters.measureText(a.tr(Arena.LOBBY_SLOGAN));
         float available=Math.min(w*.415f,Math.max(w*.325f,size*TITLE_WIDTH*1.15f));
         if (measured>available) letters.setTextSize(textSize*available/measured);
         float baseline=y+height+h*(.058f+.011f*(1-show));
         float left=x+size*11;
         letters.setColor(Color.argb(Math.round(170*show),21,16,14));
-        c.drawText(Arena.LOBBY_SLOGAN,left,baseline+h*.0018f,letters);
+        c.drawText(a.tr(Arena.LOBBY_SLOGAN),left,baseline+h*.0018f,letters);
         letters.setColor(Color.argb(Math.round(250*show),250,229,185));
-        c.drawText(Arena.LOBBY_SLOGAN,left,baseline,letters);
+        c.drawText(a.tr(Arena.LOBBY_SLOGAN),left,baseline,letters);
     }
 
     private void lobby(Canvas c, int w, int h) {
@@ -339,7 +345,7 @@ final class LobbyIntro {
         if(!reducedMotion)glow(c,left+.10f*wide,top+.5f*high,wide*.066f,high*.38f,(int)((16+44*light)*show));
         letters.setTypeface(a.title);letters.setTextAlign(Paint.Align.CENTER);
         letters.setTextSize(high*.43f);letters.setColor(Color.argb(Math.round(255*show),255,235,194));
-        c.drawText("눌러서 시작하기",left+wide*.56f,top+high*.5f-(letters.ascent()+letters.descent())*.5f,letters);
+        c.drawText(a.tr("눌러서 시작하기"),left+wide*.56f,top+high*.5f-(letters.ascent()+letters.descent())*.5f,letters);
         letters.setTextAlign(Paint.Align.LEFT);
     }
 

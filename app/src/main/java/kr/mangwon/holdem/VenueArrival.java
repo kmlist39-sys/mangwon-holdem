@@ -70,7 +70,7 @@ final class VenueArrival {
             String[] names={"opening-street.webp","mapo-room.jpg","dangsan-room.jpg"};
             Bitmap[] art=new Bitmap[names.length];
             for(int i=0;i<names.length;i++) art[i]=read(names[i]);
-            Bitmap logo=read("opening-title.webp");
+            Bitmap logo=read(a.en?"opening-mark-en.webp":"opening-title.webp");
             if(logo==null)logo=fallbackLogo();
             final Bitmap letters=logo;
             BitmapShader cutout=letterMask(letters);
@@ -86,7 +86,7 @@ final class VenueArrival {
         Bitmap image=Bitmap.createBitmap(880,226,Bitmap.Config.ARGB_8888);
         Paint letters=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.SUBPIXEL_TEXT_FLAG);
         letters.setTypeface(a.title);letters.setTextSize(150);
-        String name="망원동 홀덤";
+        String name=a.tr("망원동 홀덤");
         letters.setTextSize(150*845/letters.measureText(name));
         letters.setColor(0xffead3a7);letters.setTextAlign(Paint.Align.CENTER);
         float baseline=(image.getHeight()-letters.ascent()-letters.descent())*.5f;

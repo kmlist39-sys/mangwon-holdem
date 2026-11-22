@@ -35,6 +35,10 @@ final class GtoStudy {
             a.brass("무료 예시",355,334,168,"gtoSample");
             a.brass("구독 보기",558,334,168,"gtoStore");return;
         }
+        if(!sample&&a.g!=null&&a.g.optBoolean("heroHoleHidden")){
+            a.mid(a.getResources().getString(R.string.squeeze_study),540,236,20,a.paper);
+            a.brass("샘플 핸드 보기",440,333,200,"gtoSample");return;
+        }
         JSONObject spot=sample?SAMPLE:a.g==null?null:a.g.optJSONObject("study");
         if(spot==null)spot=a.snapshot.optJSONObject("study");
         if(spot==null){

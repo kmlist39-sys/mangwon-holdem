@@ -18,8 +18,21 @@ final class RebuyEntrance {
     private JSONObject shown;
     RebuyEntrance(StageArt stage){this.stage=stage;a=stage.a;ticket=a.image("rebuy-ticket.png");Arrays.fill(pendingHand,-1);}
     void observe(JSONObject old,JSONObject g,JSONArray events,long now){
-        if(old==null&&g!=null || g!=null&&g.optBoolean("cash")){
+        if(old==null||g==null||!old.optString("sessionId").equals(g.optString("sessionId"))){
             queue.clear();shown=null;Arrays.fill(pendingHand,-1);Arrays.fill(seatAt,0);
+        }
+        if(old!=null&&g!=null&&g.optBoolean("cash")&&g.optString("sessionId").equals(old.optString("sessionId"))){
+            JSONObject previous=old.optJSONObject("cashEvent");
+            long last=previous==null?0:previous.optLong("seq");
+            JSONArray cash=g.optJSONArray("cashEvents");
+            for(int i=0;cash!=null&&i<cash.length();i++){
+                JSONObject event=cash.optJSONObject(i);
+                if(event!=null&&event.optLong("seq")>last){
+                    queue.addLast(event);
+                    int id=event.optInt("id",-1);
+                    if(id>=0&&id<seatAt.length)seatAt[id]=now;
+                }
+            }
         }
         if(events!=null)for(int i=0;i<events.length();i++){
             JSONObject event=events.optJSONObject(i);
@@ -68,9 +81,17 @@ final class RebuyEntrance {
         if(ticket!=null)a.photo(ticket,x,y,x+262,y+64);else stage.plate(x,y,x+262,y+64,0);
         float center=x+133;
         boolean rebought="rebought".equals(shown.optString("kind"));
+        if(shown.has("session")){
+            String who=shown.optInt("id")==-1?(a.en?"You":"나"):a.tr(shown.optString("name"));
+            String action=rebought?(a.en?"Rebuy":"리바인"):(a.en?"Add-on":"애드온");
+            stage.bet.fitted(who+"  ·  "+action,center,y+25,178,15,a.paper,android.graphics.Paint.Align.CENTER);
+            stage.bet.fitted("+"+a.fmt(shown.optLong("amount"))+" P",center,y+48,178,18,a.gold,android.graphics.Paint.Align.CENTER);
+            a.c.restore();a.c.restore();return true;
+        }
         String info=rebought?"리바인 "+shown.optInt("count",1)+"회 · +"+a.fmt(shown.optInt("stack",50000))+"칩":"핸드 "+shown.optInt("hand");
         stage.bet.fitted(shown.optInt("table")+"번 테이블  ·  "+info,center,y+24,178,12,a.gold,android.graphics.Paint.Align.CENTER);
-        stage.bet.fitted(shown.optString("name")+" 님, "+(rebought?"리바인하셨습니다.":"탈락하셨습니다."),center,y+47,179,16,a.paper,android.graphics.Paint.Align.CENTER);
+        stage.bet.fitted(a.en?a.tr(shown.optString("name"))+(rebought?" has rebought.":" is out."):
+                shown.optString("name")+" 님, "+(rebought?"리바인하셨습니다.":"탈락하셨습니다."),center,y+47,179,16,a.paper,android.graphics.Paint.Align.CENTER);
         a.c.restore();a.c.restore();
         return true;
     }

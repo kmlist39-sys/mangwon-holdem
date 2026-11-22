@@ -16,7 +16,7 @@ final class BetArt {
         0xff663e43,0xff305c72,0xff2b5955,0xff3d5742,0xff58465e,0xff6a512f,0xff743e3e
     };
     private int safeLeft,safeRight,safeBottom,dockHeight;
-    BetArt(StageArt s){stage=s;a=s.a;plaque=a.image("result-plaque.png");keys=a.image("betting-keys.webp");}
+    BetArt(StageArt s){stage=s;a=s.a;plaque=a.image("result-plaque.png");keys=a.image(a.en?"betting-keys-en.webp":"betting-keys.webp");}
     void part(Bitmap b,float l,float t,float r,float d,float x,float y,float xx,float yy,int alpha){
         if(b==null)return;src.set(Math.round(l*b.getWidth()),Math.round(t*b.getHeight()),Math.round(r*b.getWidth()),Math.round(d*b.getHeight()));
         dst.set(x,y,xx,yy);a.reset(-1);a.p.setAlpha(alpha);a.c.drawBitmap(b,src,dst,a.p);
@@ -61,7 +61,7 @@ final class BetArt {
         }
         return false;
     }
-    private void reservationMark(float x,float center,float size,boolean checked){
+    void reservationMark(float x,float center,float size,boolean checked){
         float y=center-size/2,edge=Math.max(1,size*.085f);
         a.box(x,y,x+size,y+size,size*.18f,checked?0xffb39c61:0xff192d24);
         a.stroke(x+edge/2,y+edge/2,x+size-edge/2,y+size-edge/2,size*.18f,
@@ -133,7 +133,7 @@ final class BetArt {
         }
         float font=12.5f,gap=amount.isEmpty()?0:4;
         a.reset(a.paper);a.p.setTypeface(a.bold);a.p.setTextSize(font);
-        float labelW=a.p.measureText(label),amountW=a.p.measureText(amount);
+        float labelW=a.p.measureText(a.tr(label)),amountW=a.p.measureText(amount);
         float scale=Math.min(1,(maxWidth-17)/(labelW+gap+amountW));
         font*=scale;labelW*=scale;amountW*=scale;gap*=scale;
         float textWidth=labelW+gap+amountW,width=Math.max(52,textWidth+17);
@@ -143,13 +143,14 @@ final class BetArt {
         if(!amount.isEmpty())a.text(amount,left+labelW+gap,top+14.5f,font,a.gold,a.bold,Paint.Align.LEFT);
     }
     void fitted(String value,float x,float y,float width,float font,int color,Paint.Align align){
+        value=a.tr(value);
         a.reset(color);a.p.setTypeface(a.bold);a.p.setTextSize(font);
         float measured=a.p.measureText(value);
         if(measured>width)font*=width/measured;
         a.text(value,x,y,font,color,a.bold,align);
     }
     void result(){
-        float left=18,right=838,cx=(left+right)/2;
+        float left=18,right=a.cashDesk.visible()?474:647,cx=(left+right)/2;
         part(plaque,.005f,.12f,.995f,.88f,left,447,right,518,255);
         String summary=a.g.optString("summary");
         String[] winners=summary.split("  /  ");

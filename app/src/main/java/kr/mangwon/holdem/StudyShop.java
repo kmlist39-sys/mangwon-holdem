@@ -17,8 +17,8 @@ final class StudyShop {
         a.card(50,217,168,74,108,-13,false);
         a.card(51,274,161,74,108,10,false);
         a.text("실시간 GTO 가이드",396,182,28,a.paper,a.title,Paint.Align.LEFT);
-        a.txt("내 차례가 오면 테이블 오른쪽에 액션별 권장 빈도가 뜹니다.",396,219,16,a.paper);
-        a.txt("가이드를 눌러 현재 팟, 콜 비용과 선택 근거를 확인하세요.",396,246,16,a.paper);
+        a.stage.bet.fitted("내 차례가 오면 테이블 오른쪽에 액션별 권장 빈도가 뜹니다.",396,219,493,16,a.paper,Paint.Align.LEFT);
+        a.stage.bet.fitted("가이드를 눌러 현재 팟, 콜 비용과 선택 근거를 확인하세요.",396,246,493,16,a.paper,Paint.Align.LEFT);
         a.txt(BuildConfig.DEBUG ? "테스트 이용 중 · 무료" : billing.displayPrice(),396,281,21,a.gold);
         a.line(191,307,892,307,0xff716447,1);
         a.txt(billing.status(),198,337,15,a.paper);

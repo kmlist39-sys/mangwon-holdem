@@ -16,16 +16,15 @@ import android.graphics.Shader;
 
 /** The three painted club entrances share a common brass rail and a single touch coordinate system. */
 final class PubMenu {
-    static final int[][] FEES = {{50000, 100000}, {100000, 150000, 200000}};
-    private static final String[] NAMES = {"망원동", "마포구", "당산"};
+    private final String[] NAMES;
     private static final String[] KEYS = {"venue0", "venue1", "venue2"};
-    private static final String[] MOTTO = Arena.LOBBY_SLOGAN.split(" ");
+    private final String[] MOTTO;
     private static final String[] FORMATS = {
         "데일리 토너먼트  ·  2–4테이블",
         "마포구 대회  ·  12 / 24테이블",
         "원보드 / 더블보드  ·  6인 또는 9인"
     };
-    private static final String[] STAKES = {"5만 – 10만 P", "10만 – 20만 P", "20만 – 200만 P"};
+    private static final String[] STAKES = {"5만 – 10만 P", "10만 – 50만 P", "20만 – 200만 P"};
     private static final int[] INKS = {0x071713, 0x1e0e13, 0x071a29};
     private static final int[] HIGHLIGHTS = {0xfff8d69b, 0xffe6b6a0, 0xffb6dced};
     private static final int IVORY = 0xffffedcc, BRASS = 0xffd7bc88;
@@ -37,7 +36,7 @@ final class PubMenu {
     private final Bitmap[] portraits = new Bitmap[3];
     private final float[] presses = new float[3];
     private final float[] nameWidths = new float[3];
-    private final float[] mottoWidths = new float[MOTTO.length];
+    private final float[] mottoWidths;
     private final float[][] glyphWidths = new float[3][];
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
     private final Paint letters = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.SUBPIXEL_TEXT_FLAG);
@@ -62,6 +61,9 @@ final class PubMenu {
 
     PubMenu(Arena arena) {
         a = arena;
+        NAMES=a.en?new String[]{"Mangwon","Mapo","Dangsan"}:new String[]{"망원동","마포구","당산"};
+        MOTTO=(a.en?"Neighborhood poker, your way.":Arena.LOBBY_SLOGAN).split(" ");
+        mottoWidths=new float[MOTTO.length];
         arrival = new VenueArrival(arena,this);
         Bitmap atlas = a.image("lobby-venues.webp");
         if (atlas == null) atlas = a.image("venue-doors.jpg");
@@ -74,7 +76,7 @@ final class PubMenu {
             }
             glyphWidths[i] = new float[NAMES[i].length()];
             letters.setTypeface(a.title);
-            letters.setTextSize(40);
+            letters.setTextSize(a.en?33:40);
             for (int j = 0; j < NAMES[i].length(); j++) {
                 glyphWidths[i][j] = letters.measureText(NAMES[i],j,j+1);
                 nameWidths[i] += glyphWidths[i][j];
@@ -83,7 +85,7 @@ final class PubMenu {
         crest = BitmapFactory.decodeResource(a.getResources(),R.drawable.launcher_spade);
         arrow.moveTo(-3.5f,-5); arrow.lineTo(1.5f,0); arrow.lineTo(-3.5f,5);
         letters.setTypeface(a.normal);
-        letters.setTextSize(14);
+        letters.setTextSize(a.en?12:14);
         for (int i=0;i<MOTTO.length;i++) mottoWidths[i]=letters.measureText(MOTTO[i])+letters.measureText(" ");
     }
 
@@ -234,15 +236,16 @@ final class PubMenu {
             bounds.set(x-38,y-30,x-8,y+3);
             solid(Color.WHITE); paint.setAlpha(alpha); a.c.drawBitmap(crest,CREST_SOURCE,bounds,paint);
         }
-        a.text("망원동 홀덤",x,y,29,(alpha<<24)|0xf4e4bf,a.title,LEFT);
+        a.text("망원동 홀덤",x,y,a.en?25:29,(alpha<<24)|0xf4e4bf,a.title,LEFT);
         a.hit(left+12,top+1,x+145,top+54,"replayIntro");
 
-        float wordX=x+161;
+        float wordX=x+(a.en?213:161);
+        if(a.en&&right-left<1140)return;
         a.line(wordX-13,y-15,wordX-13,y+1,((alpha*95/255)<<24)|0xc7ab80,1);
         for (int i=0;i<MOTTO.length;i++) {
             float t=moving ? Math.max(0,Math.min(1,(clock-entered+130-55*i)/420f)) : 1;
             float rest=(1-t)*(1-t);
-            a.text(MOTTO[i],wordX,y-3+rest*5,14,
+            a.text(MOTTO[i],wordX,y-3+rest*5,a.en?12:14,
                 ((int)(alpha*(.43f+.57f*t))<<24)|0xd3c7ad,a.normal,LEFT);
             wordX+=mottoWidths[i];
         }
@@ -263,6 +266,7 @@ final class PubMenu {
         boolean music=a.host.musicEnabled;
         int muted=music ? 0xffe0d9c3 : 0xffaba99d;
         float soundX=walletLeft-104;
+        a.attendance.lobbyButton(soundX-230,y-15);
         a.brass(a.host.studyBilling.storeLabel(),soundX-129,y-15,118,"gtoStore");
         paint.setStrokeCap(Paint.Cap.ROUND);
         a.line(soundX+8,y+4,soundX+8,y-8,muted,1.8f);
@@ -284,7 +288,7 @@ final class PubMenu {
         a.line(walletRight-11,y-4,walletRight-11,y+4,0xff29251f,1.7f);
         a.hit(walletLeft-5,top+3,walletRight+5,top+54,"shop");
         a.line(divider,y-9,divider,y+9,0x977b6e55,1);
-        drawGear(settings-39,y);
+        if(!a.en)drawGear(settings-39,y);
         a.text("설정",settings,y+5,15,IVORY,a.bold,RIGHT);
         a.hit(divider+5,top+3,right-6,top+54,"settings");
     }
@@ -341,7 +345,7 @@ final class PubMenu {
         boolean animated=moving && playable;
         float sweep=((clock+7500-i*1700)%9300)/1250f;
         boolean glint=animated && sweep<1;
-        letters.setTypeface(a.title); letters.setTextSize(40); letters.setTextAlign(LEFT);
+        letters.setTypeface(a.title); letters.setTextSize(a.en?33:40); letters.setTextAlign(LEFT);
         if (glint) {
             foilPosition.setTranslate(x-64+sweep*(nameWidths[i]+127),0);
             foil.setLocalMatrix(foilPosition);
@@ -361,7 +365,7 @@ final class PubMenu {
             x+=glyphWidths[i][j];
         }
         letters.setShader(null);
-        a.text(i==1?"홀덤대회":"홀덤펍",start+nameWidths[i]+10,y-1,20,
+        a.text(a.en?(i==1?"Championship":"Pub"):(i==1?"홀덤대회":"홀덤펍"),start+nameWidths[i]+(a.en?7:10),y-1,a.en?17:20,
             playable?HIGHLIGHTS[i]:0xffa9ada7,a.title,LEFT);
     }
 

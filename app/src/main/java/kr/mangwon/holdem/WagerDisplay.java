@@ -29,10 +29,10 @@ final class WagerDisplay {
         if(e==null)return;
         a.stage.plate(655,395,1044,443,0);
         String move=e.optString("name")+"   "+label(e)+"   "+a.fmt(amount(e));
-        a.text(move,683,425,19,a.paper,a.bold,Paint.Align.LEFT);
+        a.stage.bet.fitted(move,683,425,a.en?202:239,19,a.paper,Paint.Align.LEFT);
         boolean totalsDiffer=e.optInt("total")!=e.optInt("paid");
         String info=totalsDiffer?"이번 투입 "+a.fmt(e.optInt("paid")):a.streets[a.g.optInt("street")]+" 기록";
-        a.text(info,1018,424,13,a.gold,a.normal,Paint.Align.RIGHT);
+        a.stage.bet.fitted(info,1018,424,a.en?119:141,13,a.gold,Paint.Align.RIGHT);
         a.hit(655,395,1044,443,"wagers");
     }
     void open(){page=0;}

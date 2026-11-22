@@ -77,9 +77,9 @@ final class TournamentBanner {
     private void load(boolean duel) {
         if(duel)loadingDuel=true;else loadingFinal=true;
         Thread loader = new Thread(() -> {
-            Bitmap loaded = arena.image(duel?"headsup-title.webp":"final-table-title.webp");
-            Bitmap timeline=duel?arena.image("headsup-ink-time.png"):null;
-            if(!duel&&loaded!=null)finalLettering.prepare(loaded);
+            Bitmap loaded = arena.image(arena.en?(duel?"headsup-en.webp":"final-table-en.webp"):(duel?"headsup-title.webp":"final-table-title.webp"));
+            Bitmap timeline=duel&&!arena.en?arena.image("headsup-ink-time.png"):null;
+            if(!arena.en&&!duel&&loaded!=null)finalLettering.prepare(loaded);
             arena.post(() -> {
                 if(duel){duelTitle=loaded;duelInk=timeline;}else finalTitle=loaded;
                 arena.invalidate();
@@ -155,7 +155,13 @@ final class TournamentBanner {
             float width = Math.min(w * .86f, h * .72f * ratio) * (.94f + .06f * enter);
             float halfH = width / (2 * ratio);
             titleBounds.set(cx - width / 2, cy - halfH, cx + width / 2, cy + halfH);
-            if(headsUp){
+            if(arena.en){
+                paint.setShader(null);paint.setColor(android.graphics.Color.WHITE);
+                paint.setAlpha(Math.round(255*opacity));
+                canvas.save();canvas.scale(1, .90f+.10f*enter,cx,cy);
+                canvas.drawBitmap(title,null,titleBounds,paint);canvas.restore();
+                if(headsUp&&animate)drawLightning(canvas,t,width,cx,cy);
+            }else if(headsUp){
                 duelLettering.draw(canvas,title,duelInk,titleBounds,t,opacity,animate);
                 if(animate)drawLightning(canvas,t,width,cx,cy);
             }else finalLettering.draw(canvas,title,titleBounds,t,opacity,animate);

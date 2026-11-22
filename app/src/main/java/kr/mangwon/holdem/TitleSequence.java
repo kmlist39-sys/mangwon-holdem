@@ -12,8 +12,8 @@ final class TitleSequence {
     final Rect[] glyph=new Rect[3];
     TitleSequence(StageArt stage){
         this.stage=stage;a=stage.a;
-        letters=a.image("show-letters.png");brush=a.image("show-brush.png");props=a.image("show-props.png");
-        if(letters!=null)for(int i=0;i<3;i++)glyph[i]=glyphBounds(i);
+        letters=a.image(a.en?"showdown-en.webp":"show-letters.png");brush=a.image("show-brush.png");props=a.image("show-props.png");
+        if(!a.en&&letters!=null)for(int i=0;i<3;i++)glyph[i]=glyphBounds(i);
     }
     // Remove transparent cell padding without trimming the inked outline.
     Rect glyphBounds(int i){
@@ -52,7 +52,14 @@ final class TitleSequence {
         prop(0,t,100,451,161,-44,-30,-25,60);
         prop(1,t,205,657,303,40,24,19,49);
         prop(0,t,170,385,285,-72,15,-36,43);
-        for(int i=0;i<3;i++){
+        if(a.en){
+            float u=out(range(t,115,510));
+            float birth=1-u;
+            a.c.save();a.c.translate(-26*birth,-17*birth);a.c.rotate(-4*birth,540,242);
+            a.c.scale(.86f+.14f*u,.86f+.14f*u,540,242);
+            target.set(235,182,845,302);a.reset(-1);a.p.setAlpha(Math.round(255*u));
+            a.c.drawBitmap(letters,null,target,a.p);a.c.restore();
+        }else for(int i=0;i<3;i++){
             float time=range(t,115+i*72,465);
             if(time<=0)continue;
             float fly=out(time),land=(float)Math.sin(Math.PI*time)*(.98f-time);

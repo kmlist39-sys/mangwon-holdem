@@ -1,6 +1,7 @@
 package kr.mangwon.holdem;
 
 import android.content.res.AssetFileDescriptor;
+import android.os.ParcelFileDescriptor;
 import org.json.JSONObject;
 import org.json.JSONArray;
 import java.io.InputStream;
@@ -18,10 +19,23 @@ final class GeminiBank {
     private final Set<String> inspected=new HashSet<>(),bad=new HashSet<>();
     private JSONObject clips,hashes,recipes;
     private boolean complete;
+    private final boolean english;
+    private String packedAudio,packedDigest;
+    private JSONObject packedRanges;
+    private boolean packedVerified,packedFailed;
     private String voice="";
     GeminiBank(GameActivity activity){
         this.activity=activity;
+        english=GameLanguage.english(activity);
         try{
+            if(english){
+                JSONObject pack=new JSONObject(new String(activity.bytes("dealer-voice-en.json"),StandardCharsets.UTF_8));
+                if(!usesDealerVoice(pack,true))return;
+                configurePack("dealer-voice-en.ogg",pack);voice=pack.getString("voice");
+                recipes=pack.getJSONObject("recipes");clips=packedRanges;
+                complete=clips.has("check")&&clips.has("showdown")&&clips.has("hand:royal")&&clips.has("share:25");
+                return;
+            }
             recipes=new JSONObject(new String(activity.bytes("dealer-phrases.json"),StandardCharsets.UTF_8));
             JSONObject wins=new JSONObject(new String(activity.bytes("dealer-win-phrases.json"),StandardCharsets.UTF_8));
             boolean fullVocabulary=recipes.length()>=710&&wins.length()>=326;
@@ -44,7 +58,35 @@ final class GeminiBank {
                 JSONArray parts=recipes.getJSONArray(key);
                 for(int i=0;i<parts.length();i++)if(!clips.has(parts.getString(i)))complete=false;
             }
+            JSONObject names=new JSONObject(new String(activity.bytes("dealer-names-ko.json"),StandardCharsets.UTF_8));
+            if(!usesDealerVoice(names,false)||!"ko-KR".equals(names.optString("locale")))return;
+            configurePack("dealer-names-ko.ogg",names);
+            for(java.util.Iterator<String> it=packedRanges.keys();it.hasNext();){
+                String key=it.next();
+                if((!key.startsWith("name:")&&!"cash:added".equals(key))||clips.has(key))
+                    throw new IOException("Invalid additional dealer recording "+key);
+                clips.put(key,packedRanges.getJSONArray(key));
+            }
         }catch(Exception ignored){}
+    }
+    private static boolean usesDealerVoice(JSONObject pack,boolean allowLiteModel){
+        if(!"google-gemini".equals(pack.optString("provider"))||!"Veda".equals(pack.optString("voice"))
+            ||!"gemini-3.8-flash-tts".equals(pack.optString("model")))return false;
+        JSONArray sources=pack.optJSONArray("sources");
+        if(sources==null||sources.length()==0)return false;
+        for(int i=0;i<sources.length();i++){
+            JSONObject source=sources.optJSONObject(i);
+            if(source==null||!"Veda".equals(source.optString("voice")))return false;
+            String model=source.optString("model");
+            if(!"gemini-3.8-flash-tts".equals(model)
+                &&!(allowLiteModel&&"gemini-3.8-flash-lite-tts".equals(model)))return false;
+        }
+        return true;
+    }
+    private void configurePack(String asset,JSONObject index)throws Exception{
+        String digest=index.getString("sha256");
+        if(!digest.matches("[a-f0-9]{64}"))throw new IOException("Invalid speech asset checksum");
+        packedAudio=asset;packedDigest=digest;packedRanges=index.getJSONObject("clips");
     }
     boolean ready(){
         if(clips==null)return false;
@@ -58,6 +100,7 @@ final class GeminiBank {
         return null;
     }
     String status(){
+        if(english)return ready()?"Google Gemini English · "+voice:"English dealer audio unavailable";
         if(!ready())return clips==null?"Google Gemini 한국어 음성 미탑재":"Google Gemini 음원 확인 필요";
         return complete&&bad.isEmpty()?"Google Gemini 한국어 · "+voice:"Google Gemini 시범 음성 · "+(clips.length()-bad.size())+"개";
     }
@@ -92,21 +135,60 @@ final class GeminiBank {
         }
         for(int i=0;i<parts.size();i++){
             String key=parts.get(i);
+            if(english&&key.startsWith("name:")&&!has(key)){
+                String fallback=englishNameFallback(key.substring(5));
+                if(!has(fallback)){out.clear();return out;}
+                out.add(fallback);continue;
+            }
             // Preserve the verified hand, result and board audio while an entrant's
             // proper name is unavailable. Never substitute another player's voice clip.
             if(key.startsWith("name:")&&!has(key))continue;
-            if(key.equals("board:and")&&((i>0&&parts.get(i-1).startsWith("name:")&&!has(parts.get(i-1)))
+            if(!english&&key.equals("board:and")&&((i>0&&parts.get(i-1).startsWith("name:")&&!has(parts.get(i-1)))
                 ||(i+1<parts.size()&&parts.get(i+1).startsWith("name:")&&!has(parts.get(i+1)))))continue;
             if(has(key)){out.add(key);continue;}
             out.clear();return out;
         }
         return out;
     }
+    private String englishNameFallback(String name){
+        JSONObject game=activity.arena==null?null:activity.arena.g;
+        JSONArray seats=game==null?null:game.optJSONArray("p");
+        if(seats!=null)for(int i=0;i<seats.length();i++){
+            JSONObject seat=seats.optJSONObject(i);
+            if(seat!=null&&name.equals(seat.optString("name")))return "seat:"+(i+1);
+        }
+        return "name:플레이어";
+    }
     AssetFileDescriptor open(String key)throws IOException{
         if(clips==null||!clips.has(key)||bad.contains(key))throw new IOException("Missing verified Gemini phrase "+key);
         return inspect(key);
     }
     private AssetFileDescriptor inspect(String key)throws IOException{
+        if(packedRanges!=null&&packedRanges.has(key)){
+            if(packedFailed)throw new IOException("Recorded speech bank is unavailable");
+            if(!packedVerified){
+                try{
+                    MessageDigest digest=MessageDigest.getInstance("SHA-256");
+                    try(InputStream stream=activity.getAssets().open(packedAudio)){
+                        byte[] bytes=new byte[8192];int length;
+                        while((length=stream.read(bytes))!=-1)digest.update(bytes,0,length);
+                    }
+                    StringBuilder hex=new StringBuilder(64);
+                    for(byte b:digest.digest()){hex.append(Character.forDigit((b&255)>>>4,16)).append(Character.forDigit(b&15,16));}
+                    if(!hex.toString().equals(packedDigest))throw new IOException("Dealer bank checksum mismatch");
+                    packedVerified=true;
+                }catch(Exception e){packedFailed=true;bad.add(key);throw new IOException(e);}
+            }
+            JSONArray range=packedRanges.optJSONArray(key);
+            if(range==null)throw new IOException("Missing recorded phrase bounds");
+            try(AssetFileDescriptor file=activity.getAssets().openFd(packedAudio)){
+                long start=range.optLong(0,-1),length=range.optLong(1,-1);
+                if(start<0||length<=0||start>file.getLength()-length)throw new IOException("Invalid recorded phrase bounds");
+                AssetFileDescriptor clip=new AssetFileDescriptor(ParcelFileDescriptor.dup(file.getFileDescriptor()),file.getStartOffset()+start,length);
+                inspected.add(key);
+                return clip;
+            }
+        }
         String id=clips.optJSONArray(key).optString(0),file="dealer-voice/"+id+".ogg";
         try{
             if(!inspected.contains(key)){

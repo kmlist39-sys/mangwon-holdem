@@ -60,12 +60,12 @@ final class CharacterProfile {
         a.c.save();a.c.clipPath(portraitClip);
         a.person(id,102,53,252,true);
         a.grad(102,205,354,305,0x00101713,0xf9101713,true);
-        a.text(name,117,290,37,a.paper,a.bold,Paint.Align.LEFT);
+        a.stage.bet.fitted(name,117,290,225,37,a.paper,Paint.Align.LEFT);
         a.c.restore();
         a.stage.plate(109,65,185,91,tier==2?1:0);
         a.mid(skill,147,83,15,tier==2?a.ink:a.paper);
         a.mid(alias.isEmpty()?job:alias,228,340,21,a.gold);
-        a.mid(job+"  ·  "+a.pubs[pub],228,366,15,a.paper);
+        a.stage.bet.fitted(job+"  ·  "+a.pubs[pub],228,366,273,15,a.paper,Paint.Align.CENTER);
         if(!line.isEmpty()){
             a.line(167,386,289,386,0xff83734d,1);
             centered("“"+line+"”",228,418,250,17,23);
@@ -95,7 +95,7 @@ final class CharacterProfile {
     }
 
     private void centered(String value,float x,float y,float width,float font,float leading){
-        String rest=value;
+        String rest=a.tr(value);
         for(int i=0;i<3&&!rest.isEmpty();i++){
             a.reset(a.paper);a.p.setTextSize(font);a.p.setTypeface(a.normal);
             int n=a.p.breakText(rest,true,width,null);

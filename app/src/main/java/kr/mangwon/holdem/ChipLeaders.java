@@ -28,11 +28,17 @@ final class ChipLeaders {
             if (i > 0) a.line(x - cell / 2, top + 9, x - cell / 2, bottom - 9, 0x796f806b, 1);
             String name = entry.optString("name");
             String chips = entry.optString("display");
+            if(a.en){
+                name=a.tr(name);
+                if(!detail&&name.contains(" "))name=name.substring(name.indexOf(' ')+1);
+                label=(tied?"T":"#")+rank;
+                if(i==0&&!tied)label="Leader";
+            }
             if (detail) {
-                a.mid(label + "   " + name, x, top + 20, 15, a.gold);
+                a.stage.bet.fitted(label+"   "+name,x,top+20,cell-5,15,a.gold,Paint.Align.CENTER);
                 a.text(chips, x, bottom - 8, 17, a.paper, a.nums, Paint.Align.CENTER);
             } else {
-                a.mid(label + "  " + name, x, top + 20, 11.5f, a.gold);
+                a.stage.bet.fitted(label+"  "+name,x,top+20,cell-5,11.5f,a.gold,Paint.Align.CENTER);
                 a.text(chips, x, bottom - 12, 16, a.paper, a.nums, Paint.Align.CENTER);
             }
         }

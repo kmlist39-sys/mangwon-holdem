@@ -54,13 +54,14 @@ final class ChipMotion {
 
     static int callUnits(int paid,int bigBlind){
         if(paid<=0)return 0;
-        int bySize=(int)Math.ceil(2*Math.log1p(paid/1600.0));
-        int byBlinds=(int)Math.ceil(1.8*Math.log1p(paid/(double)Math.max(100,bigBlind)));
-        return Math.min(14,Math.max(1,Math.max(bySize,byBlinds)));
+        double value=Math.log1p(paid/3500.0);
+        double blinds=Math.log1p(paid/(double)Math.max(100,bigBlind));
+        return Math.min(72,Math.max(1,(int)Math.ceil(1.3*value*value+Math.min(6,blinds))));
     }
     static int potLayers(int amount){
         if(amount<=0)return 0;
-        return Math.min(40,Math.max(1,(int)Math.round(Math.log1p(amount/250.0)*4.1)));
+        double value=Math.log1p(amount/1000.0);
+        return Math.min(88,Math.max(1,(int)Math.ceil(2.4*value+.56*value*value)));
     }
     private float layers(long now){
         return fromLayers+(toLayers-fromLayers)*TitleSequence.out(TitleSequence.range(now-potAt,0,690));
@@ -108,8 +109,11 @@ final class ChipMotion {
         for(int pile=0;pile<PILE_X.length;pile++){
             for(int chip=pile;chip<count;chip+=8){
                 float f=Math.min(1,Math.max(0,visible-chip)),u=TitleSequence.smooth(f);
-                float y=PILE_Y[pile]-chip/8*2.15f;
-                disc(PILE_X[pile]+(1-u)*7,Math.max(261,y-(1-u)*8),23.5f,PILE_COLOR[pile],(int)(255*u));
+                int level=chip/8;
+                float y=PILE_Y[pile]-level*2.35f;
+                float offset=((chip*7+pile)%5-2)*.65f;
+                float settle=(float)Math.sin(Math.PI*u);
+                disc(PILE_X[pile]+offset+(1-u)*8,y-(1-u)*10-settle*2,23.5f,PILE_COLOR[pile],(int)(255*u));
             }
         }
         a.stage.plate(291,291,401,316,0);
@@ -152,19 +156,26 @@ final class ChipMotion {
     private void stack(Wager w,long now){
         long age=w.age(now);
         if(age<0)return;
+        int gripStacks=Math.min(6,1+w.count/6);
+        int landingStacks=Math.min(SPREAD_X.length,2+w.count/2);
         for(int n=0;n<w.count;n++){
-            int lane=n%3,level=n/3,index=Math.floorMod(n+w.seed,SPREAD_X.length);
-            int release=REACH+lane*32+level*11;
+            int lane=n%gripStacks,level=n/gripStacks,pile=n%landingStacks;
+            int index=Math.floorMod(pile*3+w.seed,SPREAD_X.length);
+            int release=REACH+lane*15+(level%5)*9;
             float flight=TitleSequence.range(age,release,w.push?350:255);
             float travel=TitleSequence.out(flight);
-            float fromX=w.x+(lane-1)*(w.push?10:5),fromY=w.y+(lane==1?2:0)-level*2.7f;
-            float toX=w.x+SPREAD_X[index]*(w.push?1:.42f),toY=w.y+SPREAD_Y[index]*(w.push?1:.25f);
+            float fromX=w.x+(lane%3-(Math.min(3,gripStacks)-1)*.5f)*13;
+            float fromY=w.y+(lane/3)*8-level*2.55f;
+            int landedLevel=n/landingStacks;
+            float fan=w.push?Math.min(1,.62f+w.count*.009f):.43f;
+            float toX=w.x+SPREAD_X[index]*fan+((landedLevel*7+index)%5-2)*.8f;
+            float toY=w.y+SPREAD_Y[index]*fan-landedLevel*2.4f;
             // Every chip has its own release instant. Afterward its position no longer consults the wrist.
             float x=fromX+(toX-fromX)*travel,y=fromY+(toY-fromY)*travel-(float)Math.sin(Math.PI*flight)*(4+lane);
             if(age<release){x+=offX(Math.min(age,REACH));y+=offY(Math.min(age,REACH));}
             float collect=w.sweep==0?0:ease(now-w.sweep,(n%5)*32,535);
             x+=(Arena.POT_X-x)*collect;y+=(Arena.POT_Y-y)*collect-(float)Math.sin(Math.PI*collect)*11;
-            disc(x,y,(w.push?19:17)-collect*3,n+w.seed,Math.round(255*(1-collect)));
+            disc(x,y,(w.push?19:17)-collect*3,index+w.seed,Math.round(255*(1-collect)));
         }
     }
 

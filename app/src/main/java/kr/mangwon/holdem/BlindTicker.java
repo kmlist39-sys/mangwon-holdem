@@ -33,7 +33,8 @@ final class BlindTicker {
         hand = next;
         small = sb;
         big = bb;
-        message = "다음 판부터 블라인드가 " + arena.fmt(sb) + " / " + arena.fmt(bb) + "으로 적용됩니다";
+        message = arena.en ? "Next hand: blinds change to " + arena.fmt(sb) + " / " + arena.fmt(bb)
+                : "다음 판부터 블라인드가 " + arena.fmt(sb) + " / " + arena.fmt(bb) + "으로 적용됩니다";
         type.setTypeface(arena.bold);
         type.setColor(arena.paper);
         type.setTextSize(TYPE_SIZE);
