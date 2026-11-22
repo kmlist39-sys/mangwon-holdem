@@ -305,9 +305,20 @@ function canSqueezeHole(t){
  if(t.curtain>0||t.titleLeft>0||t.pocketTurnLeft>0)return false;
  return ['bet','street','showdown'].includes(t.phase);
 }
-function revealHeroHole(t){
+function squeezeCardFor(t,request){
+ if(!t||request.session!==g.exitId||request.hand!==g.count||!canSqueezeHole(t))return null;
+ const cards=t.ps.find(p=>p.id===-1).hole,index=request.index;
+ if(!Number.isInteger(index)||index<0||index>=cards.length||((g.squeezeOpenMask||0)&(1<<index)))return null;
+ return {session:g.exitId,hand:g.count,index,card:cards[index]};
+}
+function revealHeroCard(t,request){
+ const selected=squeezeCardFor(t,request);
+ if(!selected)return;
+ g.squeezeOpenMask=(g.squeezeOpenMask||0)|(1<<selected.index);
+ const count=t.double?3:2;
+ if(g.squeezeOpenMask!==((1<<count)-1))return;
  g.revealed=true;
- if(t.squeezeSettlementPending&&!t.curtain&&!t.titleLeft&&!t.pocketTurnLeft)finishSqueezedShowdown(t);
+ if(t.squeezeSettlementPending)finishSqueezedShowdown(t);
 }
 function finishSqueezedShowdown(t){
  t.squeezeSettlementPending=false;
@@ -1387,7 +1398,7 @@ function dealAt(t){
  if(t===g.ts[0]){
    if(!g.cash&&config.level===REBUY_LEVEL&&!g.rebuyLevelSeen)g.rebuyNoticePending=true;
    else if(config.level!==REBUY_LEVEL)g.rebuyNoticePending=false;
-   g.count++;g.revealed=!state.opt.squeeze;g.timer=ACTION_SECONDS;raiseTo=0;delay=.65;
+   g.count++;g.squeezeOpenMask=0;g.revealed=!state.opt.squeeze;g.timer=ACTION_SECONDS;raiseTo=0;delay=.65;
    for(let p of t.ps)if(p.id>=0){let h=state.history[p.id]||={n:0,note:''};h.n++}
  }
 }
@@ -1982,6 +1993,8 @@ function snapshot(includeSideSeats=true){
    v.g.rebuyNoticePending=!!g.rebuyNoticePending&&entryOpen(t)&&t.level===REBUY_LEVEL;
  }
  v.g.heroHoleHidden=g.revealed===false;
+ v.g.heroOpenCards=hero.hole.map((card,index)=>
+   !v.g.heroHoleHidden||((g.squeezeOpenMask||0)&(1<<index))?card:null);
  v.g.canSqueeze=canSqueezeHole(t);
  v.g.awaitingSqueeze=!!t.squeezeSettlementPending&&v.g.canSqueeze;
  if(v.g.heroHoleHidden)v.study=null;
@@ -2095,7 +2108,9 @@ function prepareAttendance(day){
  pendingAttendance={day,streak:offer.streak,cycleDay:offer.cycleDay,points:offer.points,wallet};
  return JSON.stringify({session:JSON.stringify({...state,g,attendanceDay:day,attendanceStreak:offer.streak,wallet})});
 }
-function mobile(raw){let c=JSON.parse(raw),t=g?.ts[0],preFoldConsumed=false,venueChange='';notice='';spoken='';
+function mobile(raw){let c=JSON.parse(raw),t=g?.ts[0],preFoldConsumed=false,venueChange='';
+ if(c.op==='squeezePreview')return JSON.stringify({squeezePreview:squeezeCardFor(t,c)});
+ notice='';spoken='';
  if(c.op==='liveGuide'){
    const p=t?.ps[t.actor];
    if(!p||p.id!==-1||g.revealed===false||t.phase!=='bet'||t.boardHold||g.exitId!==c.session||g.count!==c.hand||
@@ -2126,7 +2141,7 @@ function mobile(raw){let c=JSON.parse(raw),t=g?.ts[0],preFoldConsumed=false,venu
  case 'parkVenue':if(g&&c.session===g.exitId){parkGame();venueChange='parked';}break;
  case 'enter':case 'resumeVenue':venueChange=enterVenue(c);break;
  case 'step':preFoldConsumed=step(Math.max(0,Math.min(.8,c.dt)),c.inspect===true,c.holdTable===true,c.voiceBusy===true,Number.isFinite(c.clockDt)?Math.max(0,c.clockDt):Math.max(0,Math.min(.8,c.dt)))===true;break;case 'prefold':updateFoldReservation(t,c);break;case 'revealHole':
-   if(t&&c.session===g.exitId&&c.hand===g.count&&canSqueezeHole(t))revealHeroHole(t);
+   revealHeroCard(t,c);
    break;
  case 'peek':break;case 'act':if((c.session==null||c.session===g?.exitId)&&(c.hand==null||c.hand===g?.count)&&t?.phase==='bet'&&!t.boardHold&&t.ps[t.actor].id===-1&&['fold','call','raise','quarter','half','pot','allin'].includes(c.kind)){
  let key=c.kind,p=t.ps[t.actor],preset=quickBets(t,p)[key];

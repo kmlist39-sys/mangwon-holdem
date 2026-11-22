@@ -125,10 +125,12 @@ final class DealerVoice {
         String cue="full".equals(kind)?"pot":kind;
         int actor=action.optInt("id",-1);
         JSONArray seats=game.optJSONArray("p");
-        if(actor>=0&&seats!=null&&!text.isEmpty()){
+        if(actor>=0&&seats!=null&&!text.isEmpty()&&!"fold".equals(kind)&&!"call".equals(kind)){
             for(int i=0;i<seats.length();i++){
                 JSONObject seat=seats.optJSONObject(i);
                 if(seat==null||seat.optInt("id",-1)!=actor)continue;
+                JSONObject move=seat.optJSONObject("move");
+                if("allin".equals(kind)&&move!=null&&"call".equals(move.optString("kind")))break;
                 String name=seat.optString("name");
                 if(!name.isEmpty())return new DealerLine(OutcomeAnnouncement.person(name)+", "+text,"name:"+name,cue);
                 break;

@@ -281,10 +281,18 @@ public final class Arena extends View {
  void chip(float x,float y,int count,int col){int n=Math.max(1,Math.min(count,7));for(int i=0;i<n;i++){float yy=y-i*2.4f;reset(col);c.drawOval(x-9,yy-3.4f,x+9,yy+3.4f,p);reset(0xffead3a7);p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(.9f);c.drawOval(x-8,yy-3.1f,x+8,yy+2.7f,p);line(x-5,yy+1,x-4,yy+3,paper,1.7f);}}
  void card(int v,float x,float y,float w,float h,float angle,boolean back){
      if(back){cardBack.draw(c,x,y,w,h,angle,scale);return;}
+     face(v,x,y,w,h,angle,false);
+ }
+ void heroFace(int v,float x,float y,float w,float h,float angle){face(v,x,y,w,h,angle,true);}
+ private void face(int v,float x,float y,float w,float h,float angle,boolean cornerSuit){
      c.save();c.rotate(angle,x+w/2,y+h/2);
      box(x+1,y+3,x+w+1,y+h+3,5,0x86090d0b);box(x,y,x+w,y+h,5,0xfff6eddb);
      int col=v/13%2==1?0xffa73732:0xff202f2b;
-     text(RANKS[v%13],x+w*.12f,y+h*.38f,h*.38f,col,title,Paint.Align.LEFT);
+     if(cornerSuit){
+         text(RANKS[v%13],x+w*.085f,y+h*.31f,h*.30f,col,title,Paint.Align.LEFT);
+         float suitLeft=v%13==8?.53f:.39f;
+         text(SUITS[v/13],x+w*suitLeft,y+h*.285f,h*.20f,col,bold,Paint.Align.LEFT);
+     }else text(RANKS[v%13],x+w*.12f,y+h*.38f,h*.38f,col,title,Paint.Align.LEFT);
      mid(SUITS[v/13],x+w*.59f,y+h*.79f,h*.43f,col);c.restore();
  }
  void game(){

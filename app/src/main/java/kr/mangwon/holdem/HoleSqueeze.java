@@ -17,27 +17,36 @@ final class HoleSqueeze {
     private final String quickLabel;
     private float quickLabelWidth;
     private final Paint stock=new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Path cover=new Path(),lip=new Path();
+    private final Path faceWindow=new Path(),lip=new Path(),cardShape=new Path();
     private final Matrix shadeMatrix=new Matrix();
     private final LinearGradient paper=new LinearGradient(0,0,0,1,
         new int[]{0xff705646,0xffb99f80,0xffead8bb,0xfffbefda},new float[]{0,.24f,.62f,1},Shader.TileMode.CLAMP);
-    private int hand=-1,pointer=-1;
+    private final int[] exposed={-1,-1,-1};
+    private final float[] cardX=new float[3],cardY=new float[3],cardW=new float[3],cardH=new float[3],cardTilt=new float[3];
+    private int hand=-1,pointer=-1,selected=-1,privateFace=-1;
     private String session="";
     private boolean hidden,allowed,discarded,pending;
     private int requestedOption=-1;
     private long optionTime;
     private long previous,opening=-1,sent;
     private float anchorX,anchorY,target,progress;
+    private int hintId,hintCount,hintOpen;
+    private String hint="";
 
     HoleSqueeze(Arena arena){a=arena;quickLabel=a.getResources().getString(R.string.squeeze_quick);}
     private void clear(){
-        pointer=-1;progress=target=0;pending=false;discarded=false;opening=-1;
+        pointer=-1;selected=-1;privateFace=-1;progress=target=0;pending=false;discarded=false;opening=-1;
     }
     void observe(JSONObject game){
         int nextHand=game==null?-1:game.optInt("hand");
         String nextSession=game==null?"":game.optString("sessionId");
-        if(nextHand!=hand||!nextSession.equals(session)){clear();hidden=false;hand=nextHand;session=nextSession;}
+        if(nextHand!=hand||!nextSession.equals(session)){
+            clear();hidden=false;hand=nextHand;session=nextSession;
+            java.util.Arrays.fill(cardW,0);
+        }
         boolean nextHidden=game!=null&&game.optBoolean("heroHoleHidden");
+        JSONArray visible=game==null?null:game.optJSONArray("heroOpenCards");
+        for(int i=0;i<exposed.length;i++)exposed[i]=visible==null?-1:visible.optInt(i,-1);
         boolean folded=false;
         JSONArray seats=game==null?null:game.optJSONArray("p");
         for(int i=0;seats!=null&&i<seats.length();i++){
@@ -45,10 +54,19 @@ final class HoleSqueeze {
             if(seat!=null&&seat.optInt("id")==-1){folded=seat.optBoolean("fold");break;}
         }
         allowed=nextHidden&&!folded&&game.optBoolean("canSqueeze");
-        if(hidden&&!nextHidden&&pending&&!folded){opening=android.os.SystemClock.uptimeMillis();pending=false;}
+        if(pending&&selected>=0&&exposed[selected]>=0&&!folded){
+            opening=android.os.SystemClock.uptimeMillis();pending=false;privateFace=-1;
+        }
         if(folded||game==null)clear();
         if(!allowed&&pointer!=-1){discarded=true;target=0;}
         hidden=nextHidden;
+    }
+    void acceptPreview(JSONObject preview){
+        if(preview==null||pointer<0||discarded||!valid()||selected<0||
+                preview.optInt("index",-1)!=selected||!session.equals(preview.optString("session"))||
+                preview.optInt("hand",-1)!=hand)return;
+        int card=preview.optInt("card",-1);
+        if(card>=0&&card<52){privateFace=card;a.invalidate();}
     }
     boolean covers(){return hidden||opening>=0;}
     void tableSwitch(){
@@ -88,35 +106,52 @@ final class HoleSqueeze {
         if(!active&&pointer!=-1){discarded=true;target=0;}
         if(opening>=0){
             float t=Math.min(1,(now-opening)/205f);progress=MAX_PEEK+(1-MAX_PEEK)*t*(2-t);
-            if(t==1){opening=-1;target=progress=0;}return;
+            if(t==1)clear();return;
         }
         if(pending&&now-sent>1600){pending=false;target=0;}
         float weight=1-(float)Math.exp(-elapsed/(target>progress?23.0:53.0));
         progress+=(target-progress)*weight;if(Math.abs(progress-target)<.002f)progress=target;
+        if(pointer<0&&!pending&&progress==0){selected=-1;privateFace=-1;}
     }
     void controls(boolean landed,boolean folded,int count){
-        if(landed&&!folded&&progress>.005f&&(hidden||opening>=0)){
-            float reach=Math.min(1,progress/.42f);
-            float tipX=(count==3?626:607)+(1-reach)*22;
-            float tipY=423+(1-reach)*78-progress*48;
+        if(landed&&!folded&&selected>=0&&progress>.005f&&(hidden||opening>=0)){
+            int value=exposed[selected]>=0?exposed[selected]:privateFace;
+            if(value>=0)drawLiftedFace(selected,value);
+            float reach=Math.min(1,progress/.24f);
+            float tipX=cardX[selected]+cardW[selected]*.33f+10+(1-reach)*17;
+            float tipY=cardY[selected]+cardH[selected]*(.39f-.50f*progress)+(1-reach)*55;
             int alpha=opening>=0?Math.max(0,Math.min(245,Math.round((1-progress)*1100))):Math.round(245*reach);
             a.c.save();a.c.rotate(-20+progress*8,tipX,tipY);
-            a.stage.rightHand(11,0,tipX-43,tipY-17,84,88,alpha);a.c.restore();
+            a.stage.rightHand(11,0,tipX-21,tipY-10,74,77,alpha);a.c.restore();
         }
         if(!landed||folded||!allowed||!a.panel.isEmpty())return;
         boolean wait=a.g.optBoolean("awaitingSqueeze");
         int label=wait?R.string.squeeze_wait:R.string.squeeze_hint;
-        float cx=count==3?549:550;
-        a.stage.plate(cx-(wait?106:78),427,cx+(wait?106:78),450,0);
-        a.stage.bet.fitted(a.getResources().getString(label),cx,443,wait?183:135,12.5f,a.paper,Paint.Align.CENTER);
-        // The lower halves of all dealt hole cards and their label share a touch target.
-        a.hit(count==3?470:488,348,count==3?638:622,450,HIT);
+        int open=0;for(int i=0;i<count;i++)if(exposed[i]>=0)open++;
+        if(label!=hintId||count!=hintCount||open!=hintOpen){
+            hintId=label;hintCount=count;hintOpen=open;
+            hint=a.getResources().getString(label)+"  "+open+"/"+count;
+        }
+        float cx=549,half=wait?119:99;
+        a.stage.plate(cx-half,432,cx+half,454,0);
+        a.stage.bet.fitted(hint,cx,448,half*2-26,12.5f,a.paper,Paint.Align.CENTER);
+        a.hit(count==3?464:484,338,count==3?640:623,437,HIT);
     }
     private boolean inTarget(float x,float y){
         for(int i=a.hits.size()-1;i>=0;i--){
             Arena.Hit hit=a.hits.get(i);if(hit.r.contains(x,y))return HIT.equals(hit.key);
         }
         return false;
+    }
+    private int cardAt(float x,float y,int count){
+        for(int i=count-1;i>=0;i--){
+            if(cardW[i]<=0)continue;
+            double theta=Math.toRadians(cardTilt[i]),cos=Math.cos(theta),sin=Math.sin(theta);
+            float dx=x-cardX[i],dy=y-cardY[i];
+            double lx=dx*cos+dy*sin,ly=-dx*sin+dy*cos;
+            if(Math.abs(lx)<=cardW[i]*.5f&&Math.abs(ly)<=cardH[i]*.5f)return i;
+        }
+        return -1;
     }
     private boolean valid(){
         return allowed&&a.g!=null&&a.host.active&&a.screen.equals("table")&&a.panel.isEmpty()&&
@@ -127,7 +162,12 @@ final class HoleSqueeze {
         if(action==MotionEvent.ACTION_DOWN){
             float x=(event.getX()-a.offX)/a.scale,y=(event.getY()-a.offY)/a.scale;
             if(!valid()||pending||!inTarget(x,y))return false;
-            pointer=event.getPointerId(0);anchorX=x;anchorY=y;target=0;discarded=false;a.held="";return true;
+            int index=cardAt(x,y,a.g.optBoolean("double")?3:2);
+            if(index<0||exposed[index]>=0){a.held="";return true;}
+            clear();selected=index;
+            pointer=event.getPointerId(0);anchorX=x;anchorY=y;target=0;discarded=false;a.held="";
+            a.host.command("squeezePreview","session",session,"hand",hand,"index",selected);
+            return true;
         }
         if(pointer<0)return false;
         if(action==MotionEvent.ACTION_CANCEL||action==MotionEvent.ACTION_POINTER_DOWN||
@@ -143,7 +183,7 @@ final class HoleSqueeze {
                 float f=Math.max(0,Math.min(1,(dy-3)/(DISTANCE-3)));target=f*MAX_PEEK;
                 if(action==MotionEvent.ACTION_UP&&f>=1){
                     pending=true;progress=target=MAX_PEEK;sent=android.os.SystemClock.uptimeMillis();
-                    a.host.command("revealHole","session",session,"hand",hand);a.performClick();
+                    a.host.command("revealHole","session",session,"hand",hand,"index",selected);a.performClick();
                 }
             }
         }
@@ -151,21 +191,29 @@ final class HoleSqueeze {
         a.invalidate();return true;
     }
     void card(int value,float x,float y,float w,float h,float tilt,int index,int count){
-        // The sealed snapshot carries no rank or suit. The fold has only unprinted stock until the engine replies.
-        if(progress<=0){a.card(0,x,y,w,h,tilt,true);return;}
-        float f=Math.min(1,progress*(1+.027f*(index-count*.5f)));
-        a.c.save();a.c.rotate(tilt,x+w/2,y+h/2);a.c.translate(x,y);
-        if(!hidden&&value>=0)a.card(value,0,0,w,h,0,false);
-        else{a.box(1,3,w+1,h+3,5,0x8a10110c);a.box(0,0,w,h,5,0xfff0e3cb);}
-        float left=h*(1-f),right=h*(1-Math.min(1,f*1.17f)),curve=w*.073f*(float)Math.sin(f*Math.PI);
-        float depth=Math.min(h*.115f,Math.min(f,1-f)*h*.85f),end=(left+right)*.5f;
-        cover.rewind();cover.moveTo(-1,-1);cover.lineTo(w+1,-1);cover.lineTo(w+1,right);
-        cover.quadTo(w*.53f,end+curve,-1,left);cover.close();
-        a.c.save();a.c.clipPath(cover);a.card(0,0,0,w,h,0,true);a.c.restore();
+        cardX[index]=x+w/2;cardY[index]=y+h/2;cardW[index]=w;cardH[index]=h;cardTilt[index]=tilt;
+        int open=exposed[index]>=0?exposed[index]:value;
+        if(open>=0&&(index!=selected||opening<0&&!pending))a.heroFace(open,x,y,w,h,tilt);
+        else a.card(0,x,y,w,h,tilt,true);
+    }
+    private void drawLiftedFace(int index,int card){
+        float w=cardW[index],h=cardH[index],cx=cardX[index],cy=cardY[index];
+        // As the near edge rolls up, the face's printed corner travels with the seam.
+        // Draw just that lifted area after the fan; a neighbouring back cannot cover its index.
+        float f=1-(float)Math.pow(1-progress,2.1);
+        float bow=(float)Math.sin(f*Math.PI),left=h*(1-f),right=left+h*.15f*bow;
+        float depth=Math.min(h*.075f,bow*h*.18f),middle=(left+right)*.5f-w*.045f*bow;
+        a.c.save();a.c.rotate(cardTilt[index],cx,cy);a.c.translate(cx-w/2,cy-h/2);
+        cardShape.rewind();cardShape.addRoundRect(0,0,w,h,5,5,Path.Direction.CW);a.c.clipPath(cardShape);
+        faceWindow.rewind();faceWindow.moveTo(0,left);faceWindow.quadTo(w*.51f,middle,w,right);
+        faceWindow.lineTo(w,h);faceWindow.lineTo(0,h);faceWindow.close();
+        a.c.save();a.c.clipPath(faceWindow);
+        a.c.translate(0,left-depth*.15f);a.c.scale(1,.60f+.40f*f);
+        a.heroFace(card,0,0,w,h,0);a.c.restore();
         if(depth>.3f){
-            lip.rewind();lip.moveTo(0,left);lip.quadTo(w*.53f,end+curve,w,right);
-            lip.lineTo(w-.9f,right+depth*.73f);lip.quadTo(w*.53f,end+curve+depth,1,left+depth*.34f);lip.close();
-            shadeMatrix.setScale(1,depth);shadeMatrix.postTranslate(0,Math.min(left,right));paper.setLocalMatrix(shadeMatrix);
+            lip.rewind();lip.moveTo(0,left);lip.quadTo(w*.51f,middle,w,right);
+            lip.lineTo(w,right-depth*.5f);lip.quadTo(w*.51f,middle-depth,0,left-depth*.35f);lip.close();
+            shadeMatrix.setScale(1,depth);shadeMatrix.postTranslate(0,left-depth);paper.setLocalMatrix(shadeMatrix);
             stock.setShader(paper);a.c.drawPath(lip,stock);
         }
         a.c.restore();

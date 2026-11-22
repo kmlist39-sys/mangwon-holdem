@@ -91,6 +91,11 @@ public final class GameActivity extends Activity {
         boolean tick=op.equals("step");if(tick)pending=true;
         worker.post(()->{
             try{
+                if(op.equals("squeezePreview")){
+                    JSONObject preview=new JSONObject(call(j.toString())).optJSONObject("squeezePreview");
+                    ui.post(()->{if(active&&!isDestroyed())arena.holeSqueeze.acceptPreview(preview);});
+                    return;
+                }
                 boolean changesVenue=op.equals("parkVenue")||op.equals("resumeVenue")||op.equals("enter");
                 boolean cashFunding=op.equals("cashAddOn");
                 String checkpoint=changesVenue||cashFunding?call("{\"op\":\"save\"}"):null;

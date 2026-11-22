@@ -3,9 +3,9 @@
     <string name="squeeze_quick">카드 쪼으기</string>
     <string name="squeeze_next">다음 핸드부터 내 패를 쪼아서 봅니다.</string>
     <string name="squeeze_auto">다음 핸드부터 내 패가 자동으로 공개됩니다.</string>
-    <string name="squeeze_setting_detail">변경은 다음 핸드부터 적용됩니다. 패를 위로 밀었다 놓으면 열립니다.</string>
-    <string name="squeeze_hint">위로 밀어 내 패 보기</string>
-    <string name="squeeze_wait">쇼다운 · 위로 밀어 내 패 공개</string>
+    <string name="squeeze_setting_detail">다음 핸드부터 적용됩니다. 원하는 카드 한 장을 위로 밀었다 놓으세요.</string>
+    <string name="squeeze_hint">한 장씩 위로 밀기</string>
+    <string name="squeeze_wait">쇼다운 · 한 장씩 위로 밀기</string>
     <string name="squeeze_on">켜짐</string>
     <string name="squeeze_off">꺼짐</string>
     <string name="squeeze_study">내 패를 공개하면 이번 핸드의 가이드를 볼 수 있습니다.</string>

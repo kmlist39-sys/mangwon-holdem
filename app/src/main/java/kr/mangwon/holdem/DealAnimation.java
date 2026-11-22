@@ -90,7 +90,8 @@ final class DealAnimation {
             }
             view.c.save();view.c.scale(squeeze,1,x,y);
             if(masked)view.holeSqueeze.card(hole==null?-1:hole.optInt(lap,-1),x-width/2,y-height/2,width,height,tilt,lap,cards);
-            else view.card(mine?hole.optInt(lap):0,x-width/2,y-height/2,width,height,tilt,!front);
+            else if(mine&&front)view.heroFace(hole.optInt(lap),x-width/2,y-height/2,width,height,tilt);
+            else view.card(0,x-width/2,y-height/2,width,height,tilt,true);
             view.c.restore();
         }
         boolean folded=players.optJSONObject(hero).optBoolean("fold");
