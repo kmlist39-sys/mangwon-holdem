@@ -49,8 +49,8 @@ android {
         applicationId 'kr.mangwon.holdem'
         minSdk 26
         targetSdk 36
-        versionCode 25
-        versionName '0.8.5.3'
+        versionCode 26
+        versionName '0.8.5.4'
     }
 }
 dependencies {
