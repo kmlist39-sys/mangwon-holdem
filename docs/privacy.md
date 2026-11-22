@@ -5,7 +5,12 @@
 
 ## 게임 기록과 포인트
 
-망원동 홀덤은 계정 가입 없이 혼자 플레이하는 Android 게임입니다. 핸드 진행 상황, 게임 포인트, 출석 보상과 설정은 기기의 앱 전용 저장공간에 기록됩니다. 운영사는 이 기록을 서버로 전송하거나 다른 기기로 동기화하지 않습니다. 게임 포인트는 가상 재화이며 이 버전의 충전은 모의 충전입니다. 실제 결제나 결제정보 처리는 없습니다.
+망원동 홀덤은 계정 가입 없이 혼자 플레이하는 Android 게임입니다. 핸드 진행 상황, 복기 기록, 게임 포인트, 출석 보상과 설정은 기기의 앱 전용 저장공간에 기록됩니다. 운영사는 이 기록을 서버로 전송하거나 다른 기기로 동기화하지 않습니다. 게임 포인트는 가상 재화이며 포인트 충전은 모의 충전입니다.
+
+## 선택 상품인 홀덤 공부 구독
+
+0.7.8 및 이전 버전에는 유료 구독과 실제 결제가 없습니다.
+0.8.0부터 Google Play 설치판에서는 “홀덤 공부” 월 구독을 선택할 수 있습니다. 등록된 결제 수단, 결제와 정기 갱신, 취소, 환불은 Google Play에서 관리합니다. 앱은 Google Play에서 상품 ID, 구매 토큰, 서명, 구매·구독 상태를 받아 기기에서 이용 자격을 확인하고 Play에 구매를 확인합니다. 운영사는 이 정보를 별도 서버에 저장하지 않으며 카드번호나 결제 계좌 정보를 받지 않습니다. 결제 정보와 구독 관리는 Google Play의 결제 및 정기 결제 메뉴에서 확인할 수 있습니다.
 
 ## 보관과 삭제
 
@@ -36,7 +41,12 @@ Contact: kmlist39@gmail.com
 
 ## Game progress and points
 
-This single-player Android game does not require an account. Hands in progress, virtual points, attendance rewards, and preferences are saved in private app storage on your device. We do not send these records to a server or sync them between devices. Points are virtual. Top-ups in this version are simulated, and no real payments or payment details are processed.
+This single-player Android game does not require an account. Hands in progress, hand reviews, virtual points, attendance rewards, and preferences are saved in private app storage on your device. We do not send these records to a server or sync them between devices. Points are virtual and point top-ups are simulated.
+
+## Optional Hold’em Study subscription
+
+Versions 0.7.8 and earlier do not offer paid subscriptions or real payments.
+Starting with version 0.8.0, players who install the game from Google Play can choose a monthly study subscription where available. Google Play manages payment methods, payments, renewals, cancellation, and refunds. The game receives the product ID, purchase token, signature, and purchase or subscription status from Play to verify access on the device and acknowledge purchases with Play. We do not store this information on a separate server or receive your card or bank details. You can manage your billing information and subscription under Payments & subscriptions in Google Play.
 
 ## Storage and deletion
 
