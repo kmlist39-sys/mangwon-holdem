@@ -11,13 +11,13 @@ import org.json.JSONObject;
 
 /** The bottom edge of the hero's cards follows one upward drag. Release commits the reveal. */
 final class HoleSqueeze {
-    private static final float DISTANCE=69,MAX_PEEK=.78f;
+    private static final float DISTANCE=69,MAX_PEEK=.94f;
     private static final String HIT="squeezeHole";
     private final Arena a;
     private final String quickLabel;
     private float quickLabelWidth;
     private final Paint stock=new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Path faceWindow=new Path(),lip=new Path(),cardShape=new Path();
+    private final Path covered=new Path(),lip=new Path(),cardShape=new Path();
     private final Matrix shadeMatrix=new Matrix();
     private final LinearGradient paper=new LinearGradient(0,0,0,1,
         new int[]{0xff705646,0xffb99f80,0xffead8bb,0xfffbefda},new float[]{0,.24f,.62f,1},Shader.TileMode.CLAMP);
@@ -115,11 +115,10 @@ final class HoleSqueeze {
     }
     void controls(boolean landed,boolean folded,int count){
         if(landed&&!folded&&selected>=0&&progress>.005f&&(hidden||opening>=0)){
-            int value=exposed[selected]>=0?exposed[selected]:privateFace;
-            if(value>=0)drawLiftedFace(selected,value);
             float reach=Math.min(1,progress/.24f);
             float tipX=cardX[selected]+cardW[selected]*.33f+10+(1-reach)*17;
-            float tipY=cardY[selected]+cardH[selected]*(.39f-.50f*progress)+(1-reach)*55;
+            float rightEdge=.5f-progress-.09f*(float)Math.sin(progress*Math.PI);
+            float tipY=cardY[selected]+cardH[selected]*rightEdge+3+(1-reach)*48;
             int alpha=opening>=0?Math.max(0,Math.min(245,Math.round((1-progress)*1100))):Math.round(245*reach);
             a.c.save();a.c.rotate(-20+progress*8,tipX,tipY);
             a.stage.rightHand(11,0,tipX-21,tipY-10,74,77,alpha);a.c.restore();
@@ -193,27 +192,28 @@ final class HoleSqueeze {
     void card(int value,float x,float y,float w,float h,float tilt,int index,int count){
         cardX[index]=x+w/2;cardY[index]=y+h/2;cardW[index]=w;cardH[index]=h;cardTilt[index]=tilt;
         int open=exposed[index]>=0?exposed[index]:value;
-        if(open>=0&&(index!=selected||opening<0&&!pending))a.heroFace(open,x,y,w,h,tilt);
+        int face=index==selected&&open<0?privateFace:open;
+        if(index==selected&&face>=0&&progress>.001f){
+            a.heroFace(face,x,y,w,h,tilt);
+            drawCover(x,y,w,h,tilt);
+        }else if(open>=0)a.heroFace(open,x,y,w,h,tilt);
         else a.card(0,x,y,w,h,tilt,true);
     }
-    private void drawLiftedFace(int index,int card){
-        float w=cardW[index],h=cardH[index],cx=cardX[index],cy=cardY[index];
-        // As the near edge rolls up, the face's printed corner travels with the seam.
-        // Draw just that lifted area after the fan; a neighbouring back cannot cover its index.
-        float f=1-(float)Math.pow(1-progress,2.1);
-        float bow=(float)Math.sin(f*Math.PI),left=h*(1-f),right=left+h*.15f*bow;
-        float depth=Math.min(h*.075f,bow*h*.18f),middle=(left+right)*.5f-w*.045f*bow;
-        a.c.save();a.c.rotate(cardTilt[index],cx,cy);a.c.translate(cx-w/2,cy-h/2);
+    private void drawCover(float x,float y,float w,float h,float tilt){
+        if(progress>=.999f)return;
+        // The printed face is already in its final position. Only the back and its curled edge move.
+        float bow=(float)Math.sin(progress*Math.PI);
+        float left=h*(1-progress),right=left-h*.09f*bow;
+        float middle=(left+right)*.5f+h*.045f*bow,depth=h*.062f*bow;
+        a.c.save();a.c.rotate(tilt,x+w/2,y+h/2);a.c.translate(x,y);
         cardShape.rewind();cardShape.addRoundRect(0,0,w,h,5,5,Path.Direction.CW);a.c.clipPath(cardShape);
-        faceWindow.rewind();faceWindow.moveTo(0,left);faceWindow.quadTo(w*.51f,middle,w,right);
-        faceWindow.lineTo(w,h);faceWindow.lineTo(0,h);faceWindow.close();
-        a.c.save();a.c.clipPath(faceWindow);
-        a.c.translate(0,left-depth*.15f);a.c.scale(1,.60f+.40f*f);
-        a.heroFace(card,0,0,w,h,0);a.c.restore();
+        covered.rewind();covered.moveTo(0,0);covered.lineTo(0,left);
+        covered.quadTo(w*.51f,middle,w,right);covered.lineTo(w,0);covered.close();
+        a.c.save();a.c.clipPath(covered);a.card(0,0,0,w,h,0,true);a.c.restore();
         if(depth>.3f){
             lip.rewind();lip.moveTo(0,left);lip.quadTo(w*.51f,middle,w,right);
             lip.lineTo(w,right-depth*.5f);lip.quadTo(w*.51f,middle-depth,0,left-depth*.35f);lip.close();
-            shadeMatrix.setScale(1,depth);shadeMatrix.postTranslate(0,left-depth);paper.setLocalMatrix(shadeMatrix);
+            shadeMatrix.setScale(1,depth+left-right);shadeMatrix.postTranslate(0,right-depth);paper.setLocalMatrix(shadeMatrix);
             stock.setShader(paper);a.c.drawPath(lip,stock);
         }
         a.c.restore();
