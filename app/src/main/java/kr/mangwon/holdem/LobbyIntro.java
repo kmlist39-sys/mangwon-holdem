@@ -15,9 +15,10 @@ import android.graphics.RectF;
 import android.graphics.Shader;
 import android.view.MotionEvent;
 
-/** A painted tracking shot from the stained-glass spade to the neighborhood pub. */
+/** Four house aces lift off the felt to reveal the neighborhood pub and its neon sign. */
 final class LobbyIntro {
-    private static final int PROMPT_MS = 2870, EXIT_MS = 420;
+    private static final int TITLE_DELAY = 550;
+    private static final int PROMPT_MS = OpeningAces.STREET_AT + TITLE_DELAY + 2870, EXIT_MS = 420;
     private static final int NIGHT = 0xff0f191c;
     private static final float STREET_WIDTH = 1817f, STREET_HEIGHT = 866f;
     private static final float TITLE_WIDTH = 850f, TITLE_HEIGHT = 765f;
@@ -48,6 +49,8 @@ final class LobbyIntro {
         new float[]{0,.32f,.5f,.68f,1},Shader.TileMode.CLAMP);
     private Bitmap street, pedestrian, title, entryPlate;
     private Bitmap lowerEnglishWord;
+    private OpeningAces openingAces;
+    private PubNeon pubNeon;
     private boolean pending, playing, swallowUp, sounded, reducedMotion, pressed, canStartOnRelease;
     private int requestNumber;
     private long lastFrame, playhead, exitAt=-1;
@@ -82,25 +85,32 @@ final class LobbyIntro {
         reducedMotion = !ValueAnimator.areAnimatorsEnabled();
         int request = ++requestNumber;
         Thread loader = new Thread(() -> {
-            Bitmap scene = a.image("opening-street.webp");
+            Bitmap scene = a.image("opening-neon-pub.webp");
+            PubNeon sign = !reducedMotion && scene != null ? new PubNeon(scene) : null;
             Bitmap figure = a.image("opening-passerby.webp");
+            Bitmap cards = reducedMotion ? null : a.image("opening-aces.webp");
+            Bitmap felt = cards == null ? null : a.image("table.jpg");
             Bitmap wordmark = a.image(a.en?"opening-top-en.webp":"opening-title.webp");
             Bitmap lower = a.en?a.image("opening-base-en.webp"):null;
             Bitmap plate = a.image("opening-entry.webp");
             if (scene != null) scene.prepareToDraw();
             if (figure != null) figure.prepareToDraw();
             if (wordmark != null) wordmark.prepareToDraw();
+            if (cards != null) cards.prepareToDraw();
+            if (felt != null) felt.prepareToDraw();
             a.host.ui.post(() -> {
                 if (request != requestNumber || !pending || a.host.isDestroyed()) return;
                 if (scene == null || wordmark == null) { finish(); return; }
                 street = scene;
+                pubNeon = sign;
                 pedestrian = figure;
                 title = wordmark; lowerEnglishWord=lower;
                 entryPlate = plate;
+                openingAces = cards == null ? null : new OpeningAces(cards,felt);
                 pending = false;
                 playing = true;
                 sounded = false;
-                lastFrame=0;playhead=reducedMotion?PROMPT_MS+520:0;exitAt=-1;pressed=false;
+                lastFrame=0;playhead=reducedMotion?PROMPT_MS+520:openingAces==null?OpeningAces.STREET_AT:0;exitAt=-1;pressed=false;
                 a.invalidate();
             });
         }, "PubOpeningArt");
@@ -111,7 +121,9 @@ final class LobbyIntro {
     void finish() {
         requestNumber++;
         pending = playing = false;
-        street = pedestrian = title = entryPlate = null;
+        street = pedestrian = title = entryPlate = lowerEnglishWord = null;
+        openingAces = null;
+        pubNeon = null;
         a.hits.clear();
         a.invalidate();
     }
@@ -194,16 +206,17 @@ final class LobbyIntro {
 
     private void street(Canvas c, int w, int h, long ms) {
         float open = ease(ms,80,2450), drift = ease(ms,2450,4310);
-        float zoom = mix(2.12f,1.026f,open)-.022f*drift;
+        float zoom = mix(1.23f,1.026f,open)-.022f*drift;
         float scale = Math.max(w/STREET_WIDTH,h/STREET_HEIGHT)*zoom;
         float dx = w-STREET_WIDTH*scale, dy = h-STREET_HEIGHT*scale;
-        float x = mix(w*.636f-1270*scale,dx*.48f,open);
-        float y = mix(h*.42f-208*scale,dy*.21f,open);
+        float x = mix(w*.58f-989*scale,dx*.48f,open);
+        float y = mix(h*.38f-306*scale,dy*.21f,open);
         c.save();
         c.translate(Math.max(dx,Math.min(0,x)),Math.max(dy,Math.min(0,y)));
         c.scale(scale,scale);
         bitmap(c,street,null,0,0,STREET_WIDTH,STREET_HEIGHT,255);
         if (!reducedMotion) {
+            if (pubNeon != null) pubNeon.draw(c,ms);
             float pulse = .5f+.5f*(float)Math.sin(.00185f*ms-.7f);
             int saved = c.save();
             c.clipPath(glass);
@@ -358,20 +371,26 @@ final class LobbyIntro {
         long ms=playhead;
         if(exitAt>=0&&ms-exitAt>=EXIT_MS){finish();return false;}
         int w=a.getWidth(),h=a.getHeight();
-        long shot=reducedMotion?3450:ms;
+        long shot=reducedMotion?TITLE_DELAY+3450:Math.max(0,ms-OpeningAces.STREET_AT);
         if (exitAt<0||ms-exitAt<EXIT_MS/2) {
-            street(c,w,h,shot);
-            if (!reducedMotion) { rain(c,w,h,shot); foreground(c,w,h,shot); }
-            title(c,w,h,shot);
+            if(ms>=OpeningAces.STREET_AT){
+                street(c,w,h,shot);
+                if (!reducedMotion) { rain(c,w,h,shot); foreground(c,w,h,shot); }
+                title(c,w,h,shot-TITLE_DELAY);
+            }
+            if(openingAces!=null && ms<OpeningAces.CLEAR_AT){
+                openingAces.draw(c,w,h,ms);
+                if(a.host.active)openingAces.sound(a,ms);
+            }
             startPrompt(c,w,h,ms);
-            float dark=Math.max(1-ease(shot,0,260),exitAt<0?0:ease(ms-exitAt,0,EXIT_MS/2));
+            float dark=Math.max(1-ease(ms,0,260),exitAt<0?0:ease(ms-exitAt,0,EXIT_MS/2));
             if (dark>0) c.drawColor((Math.round(255*dark)<<24)|(NIGHT&0x00ffffff));
         } else {
             lobby(c,w,h);
             float dark=1-ease(ms-exitAt,EXIT_MS/2,EXIT_MS);
             c.drawColor((Math.round(255*dark)<<24)|(NIGHT&0x00ffffff));
         }
-        if (!sounded && shot>=ENTRANCES[0]) {
+        if (!sounded && shot>=TITLE_DELAY+ENTRANCES[0]) {
             sounded=true;
             if (a.host.active && a.opt.optBoolean("sound")) a.host.fx("opening",.48f);
         }

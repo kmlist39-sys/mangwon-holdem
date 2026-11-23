@@ -8,12 +8,15 @@ final class CommunityDeal {
     // Start the paper stroke before the midpoint so its edge snap lands as the face opens.
     private static final int FLIP_SOUND_LEAD=180;
     private static final int ROW_DELAY=160,FLOP_START=1420,FLOP_GAP=505,FLOP_FLIP=460;
+    private static final int FLOP_DEAL_GAP=112,FLOP_LANDING=285;
+    private static final String[] DEAL_SOUNDS={"deal1","deal2","deal3"};
     private static final int TURN_START=655,RIVER_START=925,LAST_FLIP=395;
-    private int flipsHeard;
+    private int flipsHeard,landingsHeard;
     private boolean restoring;
     CommunityDeal(Arena arena){a=arena;}
     void begin(boolean restored){
         flipsHeard=0;
+        landingsHeard=0;
         restoring=restored;
     }
     private int audibleFlips(int street,float elapsed){
@@ -33,12 +36,13 @@ final class CommunityDeal {
         float elapsed=hold>0?Math.max(0,duration-(float)(hold*1000)):duration+200;
         if(hold>0&&a.host.active&&a.live()&&a.host.talkingUntil<a.now)
             elapsed+=Math.min(180,Math.max(0,a.now-a.stage.accepted));
+        boolean playCues=hold>0&&!restoring;
         if(!a.deal.running()){
             int due=audibleFlips(street,elapsed);
             if(doubleBoard)due+=audibleFlips(street,elapsed-ROW_DELAY);
             if(due>flipsHeard){
                 int last=due-1;
-                if(hold>0&&!restoring)
+                if(playCues)
                     a.host.cardFx("flip",doubleBoard&&last%2==1?.37f:.50f);
                 flipsHeard=due;
             }
@@ -51,6 +55,15 @@ final class CommunityDeal {
             float rowTime=elapsed-row*ROW_DELAY;
             for(int i=0;i<cards.length();i++){
                 int card=cards.optInt(i);float x=start+i*step;
+                if(street==1&&cards.length()==3){
+                    int bit=1<<(3*row+i);
+                    float landedFor=rowTime-(i*FLOP_DEAL_GAP+FLOP_LANDING);
+                    if(landedFor>=0&&(landingsHeard&bit)==0){
+                        landingsHeard|=bit;
+                        // Skip past landings after a jump. They are already on the felt.
+                        if(playCues&&landedFor<FLOP_DEAL_GAP)a.host.cardFx(DEAL_SOUNDS[i],row==0?.33f:.24f);
+                    }
+                }
                 if(cards.length()==3&&rowTime<3100)flop(card,i,x,y,w,h,start+step,rowTime);
                 else if(cards.length()>3&&i==cards.length()-1){
                     float arrive=TitleSequence.out(TitleSequence.range(rowTime,0,235));
@@ -62,8 +75,8 @@ final class CommunityDeal {
         }
     }
     private void flop(int card,int i,float slot,float y,float w,float h,float center,float ms){
-        float arrivalTime=ms-112*i;if(arrivalTime<0)return;
-        float arrive=TitleSequence.out(TitleSequence.range(arrivalTime,0,285));
+        float arrivalTime=ms-FLOP_DEAL_GAP*i;if(arrivalTime<0)return;
+        float arrive=TitleSequence.out(TitleSequence.range(arrivalTime,0,FLOP_LANDING));
         float fan=TitleSequence.smooth(TitleSequence.range(ms,790,435));
         float flip=TitleSequence.smooth(TitleSequence.range(ms,FLOP_START+i*FLOP_GAP,FLOP_FLIP));
         float pileX=center+(i-1)*3.4f,pileY=y-i*2;

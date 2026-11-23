@@ -243,7 +243,8 @@ function act(t,kind,target,intent){if(t.phase!=='bet')return false;let i=t.actor
  const userKind=intent||actionKind;
  p.move={kind:actionKind,choice:userKind,amount:p.bet-priorBet,total:p.bet,increase:kind==='raise'?p.bet-priorPrice:0,allin:p.stack===0,opening:kind==='raise'&&priorPrice===0,street:t.stage};
  if(p.id>=0&&p.move.amount>0)(t.wagers??=[]).push(wagerEntry(p));
- t.announcement={seq:(t.announcement?.seq||0)+1,hand:t.hand,id:p.id,kind:p.stack===0?'allin':userKind};
+ t.announcement={seq:(t.announcement?.seq||0)+1,hand:t.hand,id:p.id,kind:p.stack===0?'allin':userKind,
+   raisesBet:kind==='raise'&&priorPrice>0&&p.bet>priorPrice};
  if(p.id===-1)t.lastHero={seq:(t.lastHero?.seq||0)+1,hand:t.hand,street:t.stage,kind:actionKind,allin:p.move.allin,text:p.action,paid:p.bet-priorBet,priorBet};
  if(study){
    study.action=p.action;

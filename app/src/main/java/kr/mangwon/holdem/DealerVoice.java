@@ -125,12 +125,17 @@ final class DealerVoice {
         String cue="full".equals(kind)?"pot":kind;
         int actor=action.optInt("id",-1);
         JSONArray seats=game.optJSONArray("p");
-        if(actor>=0&&seats!=null&&!text.isEmpty()&&!"fold".equals(kind)&&!"call".equals(kind)){
+        if(actor>=0&&seats!=null&&!text.isEmpty()&&!"check".equals(kind)&&!"call".equals(kind)
+            &&!"fold".equals(kind)&&action.optBoolean("raisesBet",true)){
             for(int i=0;i<seats.length();i++){
                 JSONObject seat=seats.optJSONObject(i);
                 if(seat==null||seat.optInt("id",-1)!=actor)continue;
-                JSONObject move=seat.optJSONObject("move");
-                if("allin".equals(kind)&&move!=null&&"call".equals(move.optString("kind")))break;
+                if(!action.has("raisesBet")){
+                    // Older snapshots only stored the bet increase on the actor's seat.
+                    JSONObject move=seat.optJSONObject("move");
+                    if(move==null||!"raise".equals(move.optString("kind"))||move.optInt("increase")<=0
+                        ||move.optInt("total")<=move.optInt("increase"))break;
+                }
                 String name=seat.optString("name");
                 if(!name.isEmpty())return new DealerLine(OutcomeAnnouncement.person(name)+", "+text,"name:"+name,cue);
                 break;
