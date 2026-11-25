@@ -11,8 +11,8 @@ const source = fs.readFileSync(process.argv[2] || engine, 'utf8');
 
 // Run the real phone bridge in a fresh game. Only the deal, seats and stacks
 // are fixed. Blind posting, action order, price changes and snapshots use the engine.
-function fixture({ hand = ['Qh', 'Qd'], button = 6, stacks = {}, seed = 34782 } = {}, script = source) {
-  const context = vm.createContext({ assert, setup: { hand, button, stacks, seed } });
+function fixture({ hand = ['Qh', 'Qd'], button = 6, stacks = {}, seed = 34782, double = false } = {}, script = source) {
+  const context = vm.createContext({ assert, setup: { hand, button, stacks, seed, double } });
   vm.runInContext(script, context);
   return vm.runInContext('(' + gameFixture.toString() + ')()', context);
 }
@@ -24,17 +24,19 @@ function gameFixture() {
     return seed / 4294967296;
   };
   const phone = data => JSON.parse(mobile(JSON.stringify(data)));
-  phone({ op: 'enter', pub: 0, double: false, buy: 50000, seats: 9, tables: 2 });
+  if (setup.double) state.wallet = 200000;
+  phone({ op: 'enter', pub: setup.double ? 2 : 0, double: setup.double, buy: setup.double ? 200000 : 50000, seats: 9, tables: 2 });
   let t = g.ts[0];
   assert.equal(t.ps[0].id, -1);
   const defaultStacks = [465600, ...Array(5).fill(200000), 58000, 122000, 58000];
   t.ps.forEach((p, i) => { p.stack = setup.stacks[i] ?? defaultStacks[i]; });
   t.btn = (setup.button + 8) % 9;
-  startHand(t, { double: false, level: 5, sb: 2000, bb: 4000 });
+  startHand(t, { double: setup.double, level: 5, sb: setup.double ? 30000 : 2000, bb: 4000, ante: 10000 });
+  t.boardHold = 0;
   g.count = t.hand;
   g.elapsed = 5 * blindLevelSeconds(g.pub);
   const hero = t.ps[0];
-  const piles = [...t.ps.map(p => p.hole), t.dc];
+  const piles = [...t.ps.map(p => p.hole), ...t.boards, t.dc];
   setup.hand.forEach((name, i) => {
     const id = 'shcd'.indexOf(name[1]) * 13 + '23456789TJQKA'.indexOf(name[0]);
     const pile = piles.find(cards => cards.includes(id));
@@ -96,11 +98,24 @@ function gameFixture() {
     Object.defineProperty(t, 'dc', { get: noRead });
     Math.random = noRead;
     assert.deepEqual(phone(allowed), expected);
-    for (const stale of [{ hand: allowed.hand - 1 }, { pot: allowed.pot + 1000 }, { call: 0 }]) {
+    for (const stale of [{ hand: allowed.hand - 1 }, { pot: allowed.pot + 1000 }, { call: allowed.call + 1 }]) {
       assert.deepEqual(phone({ ...allowed, ...stale }), {});
     }
   }
-  return { play, guide, toScreenshot, save, reload, checkPublicReads, remaining: seat => t.ps[seat].stack };
+  function advanceStreet(cards) {
+    assert.equal(t.phase, 'street');
+    if (cards) {
+      const id = card => 'shcd'.indexOf(card[1]) * 13 + '23456789TJQKA'.indexOf(card[0]);
+      const available = [...t.ps.slice(1).map(p => p.hole), t.dc];
+      cards.forEach((name, i) => {
+        const pile = available.find(cards => cards.includes(id(name)));
+        const j = pile.indexOf(id(name));
+        [t.dc[i], pile[j]] = [pile[j], t.dc[i]];
+      });
+    }
+    street(t);
+  }
+  return { play, guide, toScreenshot, save, reload, checkPublicReads, advanceStreet, remaining: seat => t.ps[seat].stack };
 }
 
 test('nine-handed QQ opens across deal seeds and suit permutations', () => {
@@ -133,6 +148,43 @@ test('hero and button limp, SB raises to 12k, folded BB stays in the pot', testC
   assert.equal(spot.eligible, 24000);
   assert.equal(spot.call, 8000);
   assert.equal(spot.odds, 25);
+  const { action, seats, commitment, sizing } = spot.detail;
+  assert.match(spot.detail.mixReasonKo, /QQ.*프리미엄 페어.*JJ\/TT/);
+  assert.match(spot.detail.mixReasonEn, /QQ.*premium pair.*JJ\/TT/);
+  assert.match(sizing.reasonKo, /SB의 추가 콜은 24,000칩/);
+  assert.match(sizing.reasonEn, /SB faces 24,000/);
+  assert.equal(action.before, 0);
+  assert.equal(action.after, 2);
+  assert.equal(action.pending, 1);
+  assert.equal(action.raiseThreats, 1);
+  const [button, smallBlind] = seats;
+  assert.equal(button.position, 'BTN');
+  assert.equal(button.role, 'caller');
+  assert.equal(button.difference, -407600);
+  assert.equal(button.effective, 46000);
+  assert(button.pending && button.canReraise);
+  assert.equal(smallBlind.position, 'SB');
+  assert.equal(smallBlind.role, 'raiser');
+  assert.equal(smallBlind.difference, -351600);
+  assert.equal(smallBlind.effective, 110000);
+  assert(!smallBlind.pending && !smallBlind.canReraise);
+  assert.equal(action.lastRaiserId, smallBlind.id);
+  assert.equal(commitment.heroStack, 461600);
+  assert.equal(commitment.startingStack, 465600);
+  assert.equal(commitment.invested, 4000);
+  assert.equal(commitment.investedPct, 0.9);
+  assert.equal(commitment.committedAfterCallPct, 2.6);
+  assert.equal(commitment.afterCall, 453600);
+  assert.equal(commitment.eligibleAfterCall, 32000);
+  assert.equal(commitment.effectiveAfterCall, 110000);
+  assert.equal(commitment.spr, 3.44);
+  assert.equal(sizing.target, spot.raiseTo);
+  assert.equal(sizing.pay, sizing.target - 4000);
+  assert.equal(sizing.increase, sizing.target - 12000);
+  assert.equal(sizing.potMultiple, Math.round(100 * sizing.increase / 32000) / 100);
+  for (const part of [action, commitment, sizing]) {
+    assert(part.reasonKo && part.reasonEn && Math.max(part.reasonKo.length, part.reasonEn.length) < 260);
+  }
   assert(spot.fold <= 10 && spot.raise > 0, JSON.stringify(spot));
   game.reload();
   assert.deepEqual(game.guide(), spot);
@@ -217,6 +269,10 @@ test('short all-in calls use eligible chips, and incomplete shoves cannot reopen
   assert.equal(capped.eligible, 18500);
   assert.equal(capped.odds, 11.9);
   assert(capped.allInCall && !capped.canRaise);
+  assert.equal(capped.detail.commitment.eligibleAfterCall, 21000);
+  assert.equal(capped.detail.commitment.committedAfterCallPct, 100);
+  assert.equal(capped.detail.commitment.spr, 0);
+  assert.equal(capped.detail.action.raiseThreats, 0);
   const game = fixture({ stacks: { 2: 16000 } });
   game.play(0, 'raise', 12000);
   game.play(1, 'call');
@@ -225,6 +281,114 @@ test('short all-in calls use eligible chips, and incomplete shoves cannot reopen
   const locked = game.guide();
   assert.equal(locked.call, 4000);
   assert(!locked.canRaise && !locked.allInCall);
+  assert.equal(locked.detail.action.allIn, 1);
+  assert.equal(locked.detail.action.pending, 1);
+  assert.equal(locked.detail.action.raiseThreats, 0);
+  assert.equal(locked.detail.seats.find(s => s.pending).canReraise, false);
+  assert.match(locked.detail.sizing.reasonEn, /did not reopen/i);
+});
+
+test('cumulative short shoves reopen both the original raiser and the pending caller', () => {
+  const game = fixture({ stacks: { 2: 16000, 3: 20000 } });
+  game.play(0, 'raise', 12000);
+  game.play(1, 'call');
+  game.play(2, 'raise', 16000);
+  game.play(3, 'raise', 20000);
+  for (let i = 4; i <= 8; i++) game.play(i, 'fold');
+  const result = game.guide();
+  assert(result.canRaise);
+  assert.equal(result.detail.action.pending, 1);
+  assert.equal(result.detail.action.raiseThreats, 1);
+  assert.equal(result.detail.action.allIn, 2);
+  assert.equal(result.detail.sizing.minTo, 28000);
+});
+
+test('covering stacks still to act tighten a marginal opening decision', () => {
+  const tiny = Object.fromEntries([1, 2, 3, 4, 5, 6, 8].map(i => [i, 4100]));
+  let changed = false;
+  for (const hand of [['As', '9h'], ['Qs', 'Jh'], ['Ks', 'Th'], ['As', '6s'], ['Js', 'Ts'], ['6s', '6h']]) {
+    const shallow = fixture({ hand, stacks: tiny }).guide();
+    const deep = fixture({ hand }).guide();
+    assert.deepEqual(shallow.detail.action.pending, deep.detail.action.pending);
+    if (deep.fold > shallow.fold) changed = true;
+  }
+  assert(changed, 'the same positions and price should reflect the effective stacks still to act');
+});
+
+test('calling all-in into a lone big blind closes the action even if BB has an unacted option', () => {
+  const game = fixture({ button: 0, stacks: { 0: 4000 } });
+  for (let i = 3; i <= 8; i++) game.play(i, 'fold');
+  // With two opponents the SB can still choose a response, and the BB retains
+  // its option against SB. Neither can raise the hero after this all-in call.
+  const result = game.guide();
+  assert.equal(result.detail.action.pending, 2);
+  assert.equal(result.detail.action.raiseThreats, 0);
+  assert.equal(result.detail.commitment.afterCall, 0);
+
+  const two = fixture({ button: 8, stacks: { 0: 4000 } });
+  for (let i = 2; i <= 8; i++) two.play(i, 'fold');
+  const headsUp = two.guide();
+  assert.equal(headsUp.detail.action.pending, 0);
+  assert.equal(headsUp.detail.seats[0].position, 'BB');
+});
+
+test('a live opponent acts before the button on the flop, with a rounded one-third-pot dry-board bet', () => {
+  const game = fixture({ button: 0, hand: ['Ah', 'Ad'] });
+  for (let i = 3; i <= 8; i++) game.play(i, 'fold');
+  game.play(0, 'call');
+  game.play(1, 'fold');
+  game.play(2, 'call');
+  game.advanceStreet(['Ks', '7h', '2d']);
+  game.play(2, 'call');
+  const dry = game.guide(), { seats, action, sizing } = dry.detail;
+  assert.equal(dry.opening, true);
+  assert.match(dry.detail.mixReasonKo, /오버페어.*가치 베팅/);
+  assert.match(dry.detail.mixReasonEn, /Overpair.*value bet/);
+  assert.equal(dry.fold, 0);
+  assert.equal(action.before, 1);
+  assert.equal(action.after, 0);
+  assert.equal(action.pending, 0);
+  assert.equal(seats[0].position, 'BB');
+  assert.equal(seats[0].side, 'before');
+  assert.equal(sizing.target, 4000); // 10,000 pot, rounded and clamped to a legal BB.
+  assert.equal(sizing.potMultiple, 0.4);
+  assert.equal(sizing.pay, sizing.target);
+  game.checkPublicReads();
+});
+
+test('a short all-in only contests the main pot; side-pot equity is weighted by chips', () => {
+  const game = fixture({ button: 0, stacks: { 1: 12000 }, hand: ['9d', '9c'] });
+  for (let i = 3; i <= 8; i++) game.play(i, 'fold');
+  game.play(0, 'raise', 12000);
+  game.play(1, 'call');
+  game.play(2, 'call');
+  game.advanceStreet(['Ks', '7h', '2d']);
+  game.play(2, 'raise', 32000);
+  const result = game.guide(), [main, side] = result.detail.potLayers;
+  assert.equal(main.amount, 36000);
+  assert.equal(main.opponents, 2);
+  assert.equal(side.amount, 64000);
+  assert.equal(side.opponents, 1);
+  assert(side.equity > main.equity);
+  assert(Math.abs(result.equity - (main.equity * 0.36 + side.equity * 0.64)) <= 0.55);
+  assert.equal(result.odds, 32);
+  game.checkPublicReads();
+});
+
+test('double-board first action follows the live small blind and includes all dead antes', () => {
+  const game = fixture({ button: 7, double: true, hand: ['As', 'Kh', 'Qd'] });
+  const result = game.guide(), { action, seats, sizing } = result.detail;
+  assert.equal(result.detail.double, true);
+  assert.match(result.detail.mixReasonKo, /위 보드.*아래 보드/);
+  assert.equal(result.detail.cash, true);
+  assert.equal(result.pot, 120000);
+  assert.equal(result.call, 30000);
+  assert.equal(sizing.potAfterCall, 150000);
+  assert.equal(action.before, 0);
+  assert.equal(action.after, 8);
+  assert.equal(action.pending, 8);
+  assert.equal(seats[seats.length - 1].position, 'SB');
+  game.checkPublicReads();
 });
 
 test('big blind option can always check for free', () => {
