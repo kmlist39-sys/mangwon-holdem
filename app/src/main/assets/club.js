@@ -721,18 +721,37 @@ function partialShuffle(cards,from,count,random=Math.random){
    const tmp=cards[i];cards[i]=cards[next];cards[next]=tmp;
  }
 }
-function masterEquity(h,boards,opponents,budget,random=Math.random){
+// Divide only the chips already paid (plus our proposed call). A live player
+// still to act may contest a layer up to their stack, without counting a future
+// call as money already in the middle. Folded contributions stay in each layer.
+function studyPotLayers(t,p,call){
+ const capPaid=p.paid+call,rivals=t.ps.filter(q=>q!==p&&!q.fold);
+ const reach=rivals.map(q=>Math.min(capPaid,q.paid+q.stack));
+ const caps=[...new Set([capPaid,...reach])].filter(x=>x>0).sort((a,b)=>a-b);
+ if(caps.length<=1)return [];
+ const layers=[];let lower=0;
+ for(const upper of caps){
+   const amount=t.ps.reduce((sum,q)=>sum+Math.max(0,Math.min(q===p?capPaid:q.paid,upper)-lower),0);
+   if(amount)layers.push({amount,opponents:reach.filter(x=>x>=upper).length,upper,share:0});
+   lower=upper;
+ }
+ return layers;
+}
+function masterEquity(h,boards,opponents,budget,random=Math.random,layers){
  // Hidden opponent/folded cards and the actual shuffled deck never enter here.
  const known=new Set([...h,...boards.flat()]);
  const unseen=Array.from({length:52},(_,i)=>i).filter(i=>!known.has(i));
  const partial=boards.filter(b=>b.length>=3).map(boardMasks),k=h.length;
  const trials=budget||cap(Math.floor(400/(opponents.length*boards.length*(k===3?3:1))),22,96);
  const parts=boards.map(()=>0);let scoops=0;
+ const layered=!!layers?.length;
  for(let n=0;n<trials;n++){
    const cards=unseen.slice(),rivals=[];let cursor=0,won=0;
+   const reach=layered?[]:null;
    for(const opponent of opponents){
      if(opponent.rangeEnd){
        if(opponent.participation<1&&random()>=opponent.participation)continue;
+       if(layered)reach.push(opponent.maxClaim);
        rivals.push(dealStudyRange(cards,cursor,opponent.rangeEnd,random));cursor+=2;continue;
      }
      if(opponent.uncommitted&&random()>.31-.22*opponent.fold)continue;
@@ -748,6 +767,7 @@ function masterEquity(h,boards,opponents,budget,random=Math.random){
        }
        if(chosen)for(let i=0;i<k;i++)cards[cursor+chosen*k+i]=cards[cursor+i];
      }
+     if(layered)reach.push(opponent.maxClaim);
      rivals.push(winner);cursor+=k;
    }
    for(let j=0;j<boards.length;j++){
@@ -756,6 +776,19 @@ function masterEquity(h,boards,opponents,budget,random=Math.random){
      partialShuffle(cards,cursor,need,random);
      const finalBoard=boardMasks(board.concat(cards.slice(cursor,cursor+need)));cursor+=need;
      const me=simulatedScore(h,finalBoard);let tied=1,beaten=false;
+     if(layered){
+       const scores=rivals.map(rival=>simulatedScore(rival,finalBoard));
+       for(const layer of layers){
+         let ties=1,win=true;
+         for(let i=0;i<scores.length;i++){
+           if(reach[i]<layer.upper)continue;
+           if(scores[i]>me){win=false;break;}
+           if(scores[i]===me)ties++;
+         }
+         if(win)layer.share+=1/ties;
+       }
+       continue;
+     }
      for(const rival of rivals){
        const score=simulatedScore(rival,finalBoard);
        if(score>me){beaten=true;break}
@@ -765,9 +798,17 @@ function masterEquity(h,boards,opponents,budget,random=Math.random){
    }
    if(won===boards.length)scoops++;
  }
+ if(layered){
+   let chips=0,expected=0;
+   for(const layer of layers){
+     layer.share/=trials*boards.length;
+     chips+=layer.amount;expected+=layer.amount*layer.share;
+   }
+   return {share:expected/chips};
+ }
  return {share:parts.reduce((sum,n)=>sum+n,0)/(trials*boards.length),scoop:scoops/trials};
 }
-function studyPreflopMix(t,p,context,call,odds,equity){
+function studyPreflopMix(t,p,context,call,odds,equity,tableRead){
  const {raises,limpers,openingWidth,depth,late,raiseBB,raiser}=context;
  const legal=canRaise(t,p),inBlind=t.actor===t.bbSeat||t.actor===t.sbSeat;
  const percentile=openingRanks().percent.get(pairOpening(...p.hole));
@@ -776,8 +817,9 @@ function studyPreflopMix(t,p,context,call,odds,equity){
  const mix=(width,band)=>cap(.5+(width-percentile)/Math.min(band,width),0,1);
  let play,attack,title,reason,target;
  const min=t.price+t.raise,max=p.stack+p.bet,bb=t.bb;
+ const pressure=tableRead?.pressure||0;
  if(!raises){
-   const width=limpers?cap(openingWidth+.08,.22,.64):openingWidth;
+   const width=(limpers?cap(openingWidth+.08,.22,.64):openingWidth)*(1-.12*pressure);
    play=mix(width,.07);
    if(limpers||inBlind){
      const value=mix(limpers?.15:width*.72,.08);
@@ -792,7 +834,7 @@ function studyPreflopMix(t,p,context,call,odds,equity){
    const base=raises===1?.21+(late?.065:0)+(t.actor===t.bbSeat?.12:0):
      raises===2?.085+(late?.022:0):raises===3?.038:.016;
    const band=raises===1?.09:raises===2?.044:.018;
-   play=mix(base*sizeFactor,band);
+   play=mix(base*sizeFactor*(1-.20*pressure),band);
    const valueWidth=(raises===1?.043+(late?.012:0):raises===2?.021:.009)*sizeFactor;
    const value=mix(valueWidth,raises===1?.045:.019);
    const ranks=p.hole.map(c=>c%13+2),wheelAce=Math.max(...ranks)===14&&Math.min(...ranks)<=5;
@@ -802,7 +844,8 @@ function studyPreflopMix(t,p,context,call,odds,equity){
    const hasPosition=raiser&&last(t.actor)>last(t.ps.indexOf(raiser));
    const callers=t.ps.filter(q=>q!==p&&q!==raiser&&!q.fold&&q.bet===t.price&&q.line?.preCall).length;
    target=t.price*((raises===1?(hasPosition?3:3.6):2.35)+callers*.65);
-   const raiserStack=raiser?Math.min(max,raiser.stack+raiser.bet):context.effective;
+   // A short all-in opener cannot contest a side pot, but a deep live caller can.
+   const raiserStack=tableRead?Math.min(max,tableRead.contestableTo):raiser?Math.min(max,raiser.stack+raiser.bet):context.effective;
    if(target>=raiserStack*.56)target=raiserStack;
    title=raises===1?'첫 레이즈에 콜과 재레이즈 비교하기':raises===2?'3벳을 받은 뒤 계속할 패 고르기':raises+'번의 레이즈에 맞춰 상대 범위 좁히기';
    reason=raises===1?'상대가 '+money(t.price)+'칩으로 올렸습니다. 강한 패는 재레이즈로 팟을 키울 수 있고, 콜하면 뒤에 남은 상대도 참여할 수 있습니다.':'레이즈가 겹칠수록 상대가 남길 패도 강해집니다. 내 패의 예상 지분과 추가로 내야 할 칩을 함께 봅니다.';
@@ -828,12 +871,17 @@ function studyPreflopMix(t,p,context,call,odds,equity){
  const raiseTo=legal?Math.min(max,Math.max(min,Math.round(target/step)*step)):0;
  return {fold,passive:100-fold-raise,raise,raiseTo,title,reason};
 }
-function studyDecision(t,p){
+function studyDecision(t,p,tableRead){
  const boards=t.boards.map(b=>b.slice()),hole=p.hole.slice(),call=Math.min(p.stack,owing(t,p));
  const capPaid=p.paid+call;
  const pot=t.ps.reduce((n,q)=>n+q.paid,0),eligible=t.ps.reduce((n,q)=>n+Math.min(q.paid,capPaid),0);
  const odds=call?call/(eligible+call):0;
  const opponents=opponentsFor(t,p);
+ const layers=studyPotLayers(t,p,call);
+ if(layers.length){
+   const rivals=t.ps.filter(q=>q!==p&&!q.fold);
+   opponents.forEach((o,i)=>{o.maxClaim=rivals[i].paid+rivals[i].stack;});
+ }
  const preflop=t.stage===0&&boards.length===1&&hole.length===2?studyPreflopSpot(t,p,opponents):null;
  // This seed is built solely from the acting player's cards and the public spot.
  // Reviewing a hand consumes no RNG used by the game or its opponents.
@@ -841,7 +889,7 @@ function studyDecision(t,p){
  for(const n of [t.hand,t.stage,t.btn,...hole,...boards.flat(),...t.ps.map(q=>q.bet)])seed=Math.imul(seed^n,16777619)>>>0;
  const random=()=>{seed=(Math.imul(1664525,seed)+1013904223)>>>0;return seed/4294967296};
  const budget=preflop&&(preflop.raises>=3||call===p.stack)?384:192;
- const estimate=masterEquity(hole,boards,opponents,budget,random).share;
+ const estimate=masterEquity(hole,boards,opponents,budget,random,layers).share;
  const seat=t.actor,n=t.ps.length;
  const last=(i)=>(i-t.btn-1+n)%n;
  const inPosition=t.ps.every((q,i)=>q===p||q.fold||q.stack===0||last(i)<last(seat));
@@ -851,7 +899,7 @@ function studyDecision(t,p){
  const reopen=canRaise(t,p),checked=p.line?.lastCheck===t.stage;
  let title,reason,preflopMix;
  if(preflop){
-   preflopMix=studyPreflopMix(t,p,preflop,call,odds,estimate);
+   preflopMix=studyPreflopMix(t,p,preflop,call,odds,estimate,tableRead);
    ({title,reason}=preflopMix);
  }else if(boards.length===2){
    title='두 보드의 지분을 합쳐 판단하기';
@@ -872,34 +920,261 @@ function studyDecision(t,p){
    title=inPosition?'포지션으로 베팅 크기 정하기':'내 뒤에 남은 사람 확인하기';
    reason=opponents.length>1?'여러 명이 남으면 모두를 폴드시킬 확률이 낮습니다. 베팅 전 어떤 약한 패가 콜할지, 누가 다시 레이즈할지 살펴보세요.':inPosition?'상대가 먼저 행동합니다. 약한 패의 콜을 받을 때 베팅하고 중간 세기의 패는 체크로 쇼다운까지 가져가는 선택도 있습니다.':'상대가 내 행동을 본 뒤 결정합니다. 뒤에서 레이즈를 받았을 때 계속할 수 있는 패인지 먼저 정하세요.';
  }
- return {hand:t.hand,street:t.stage,position,hole,boards,opponents:opponents.length,pot,eligible,call,stack:p.stack,preflopMix,
+ const potLayers=layers.map(layer=>({amount:layer.amount,opponents:layer.opponents,equity:Math.round(1000*layer.share)/10}));
+ return {hand:t.hand,street:t.stage,position,hole,boards,opponents:opponents.length,pot,eligible,call,stack:p.stack,preflopMix,potLayers,
    odds:Math.round(odds*1000)/10,equity:Math.round(estimate*100),title,reason,cash:!!g?.cash,
    forced:t.double&&t.bbSeat===-1?{ante:t.ante??cashLevels[g?.cashLevel??0].ante,sb:t.sb}:null};
 }
-// A training mix for the current decision. Equity is sampled against public ranges;
-// the recommendation is an estimate, not a precomputed equilibrium solution.
-function liveStudyGuide(t,p){
- const spot=studyDecision(t,p),legal=canRaise(t,p);
- if(spot.preflopMix){
-   const mix=spot.preflopMix;
-   return {pot:spot.pot,eligible:spot.eligible,call:spot.call,odds:spot.odds,equity:spot.equity,position:spot.position,
-     ...mix,canRaise:legal,opening:false,allInRaise:legal&&mix.raiseTo===p.stack+p.bet,allInCall:spot.call>0&&spot.call===p.stack};
+function studySeatLabel(t,seat){
+ const n=t.ps.length,offset=(seat-t.btn+n)%n;
+ if(seat===t.btn)return seat===t.sbSeat?'BTN/SB':'BTN';
+ if(seat===t.sbSeat)return 'SB';
+ if(seat===t.bbSeat)return 'BB';
+ if(n===2&&t.bbSeat===-1)return 'OOP';
+ if(offset===n-1)return 'CO';
+ if(n>=6&&offset===n-2)return 'HJ';
+ if(n>=7&&offset===n-3)return 'LJ';
+ const early=offset-(t.bbSeat===-1?2:3);
+ return early>0?'UTG+'+early:'UTG';
+}
+function studyTableRead(t,p){
+ const n=t.ps.length,hero=t.ps.indexOf(p),cost=Math.min(p.stack,owing(t,p));
+ const firstBlind=t.double&&t.stage===1?t.sbSeat:t.stage===0?t.bbSeat:t.btn;
+ const first=((firstBlind??t.btn)+1)%n;
+ const heroOrder=(hero-first+n)%n;
+ const bettingLocked=t.ps.filter(q=>!q.fold&&(q===p?q.stack>cost:q.stack>0)).length<2;
+ const seats=[];
+ let pending=0,raiseThreats=0,allIn=0,effectiveAfterCall=0,contestableTo=t.price,pressure=0;
+ const pot=t.ps.reduce((sum,q)=>sum+q.paid,0),potAfterCall=pot+cost;
+ const priceSetter=t.wagers?.slice().reverse().find(w=>w.kind==='raise'&&w.total===t.price);
+ for(let k=0;k<n;k++){
+   const i=(first+k)%n,q=t.ps[i];
+   if(i===hero||q.fold)continue;
+   const facing=owing(t,q);
+   const owesAction=q.stack>0&&(!bettingLocked||facing>0)&&(Array.isArray(t.pending)?t.pending.includes(i):q.actedAt==null||facing>0);
+   const effective=Math.min(p.stack-cost,Math.max(0,q.stack-facing));
+   const canReraise=owesAction&&p.stack>cost&&canRaise(t,q);
+   const raised=q.bet===t.price&&t.price>0&&(priceSetter?priceSetter.id===q.id:
+     q.move?.street===t.stage&&q.move.kind==='raise'&&q.move.total===t.price);
+   const called=q.move?.kind==='call'&&q.move.street===t.stage||t.wagers?.some(w=>w.id===q.id&&w.kind==='call')
+     ||t.stage===0&&q.line?.preCall;
+   seats.push({id:q.id,name:nameOf(q.id),position:studySeatLabel(t,i),side:k<heroOrder?'before':'after',
+     stack:q.stack,difference:q.stack-p.stack,effective,pending:owesAction,canReraise,allIn:q.stack===0,
+     streetBet:q.bet,role:raised?'raiser':called?'caller':'other'});
+   if(owesAction)pending++;
+   if(canReraise){
+     raiseThreats++;
+     // A player with 50 chips left cannot apply the same pressure as a covering stack.
+     const foldRate=(3+(q.reads?.folded||0))/(7+(q.reads?.faced||0));
+     const aggression=(3+(q.reads?.raises||0))/(12+(q.reads?.decisions||0));
+     pressure+=Math.min(1,effective/Math.max(potAfterCall,2*t.bb))*(.24+.42*aggression+.13*(1-foldRate));
+   }
+   if(!q.stack)allIn++;
+   effectiveAfterCall=Math.max(effectiveAfterCall,effective);
+   if(q.stack>0)contestableTo=Math.max(contestableTo,q.bet+q.stack);
  }
- const share=spot.equity/100,required=spot.odds/100;
- const river=t.stage===3,playingLast=t.actor===t.btn;
- const realization=river?1:cap(.92+(playingLast?.06:0)-.035*(spot.opponents-1),.72,.98);
- const edge=share*realization-required;
- const continueRate=spot.call?1/(1+Math.exp(-edge/.050)):1;
- const draw=t.stage>0?t.boards.reduce((n,b)=>n+handTexture(p.hole,b).draw,0)/t.boards.length:0;
- const value=cap((share-(spot.opponents>1?.53:.58))/.32,0,1);
- const aggression=legal?cap(.025+.78*value+draw*(playingLast?.55:.40)+(playingLast?.035:0),0,.93):0;
- const fold=spot.call?Math.round(100*(1-continueRate)):0;
- const raise=legal?Math.min(100-fold,Math.round((100-fold)*aggression)):0;
- const bet=legal?quickBets(t,p).half.target:0;
- return {pot:spot.pot,eligible:spot.eligible,call:spot.call,odds:spot.odds,equity:spot.equity,
-   position:spot.position,fold,passive:100-fold-raise,raise,canRaise:legal,raiseTo:bet,
-   opening:t.price===0,allInRaise:legal&&bet===p.bet+p.stack,allInCall:spot.call>0&&spot.call===p.stack,
-   title:spot.title,reason:spot.reason};
+ const before=seats.filter(s=>s.side==='before').length;
+ const lastRaiser=seats.find(s=>s.role==='raiser');
+ const action={before,after:seats.length-before,pending,raiseThreats,allIn,lastRaiserId:lastRaiser?.id??null};
+ action.reasonKo='이번 스트리트 순서상 앞집 '+before+'명, 뒷집 '+action.after+'명. '+(pending?
+   '내가 '+(cost?'콜':'체크')+'하면 '+pending+'명이 더 결정하고, 그중 '+raiseThreats+'명이 나를 상대로 '+(t.price?'올릴':'베팅할')+' 수 있습니다.':
+   '내 '+(cost?'콜':'체크')+'로 베팅이 끝납니다.');
+ action.reasonEn=before+' before you, '+action.after+' after you in street order. '+(pending?
+   'After your '+(cost?'call':'check')+', '+pending+' still to act. '+raiseThreats+' can '+(t.price?'raise':'bet')+' against you.':
+   'Your '+(cost?'call':'check')+' closes the betting.');
+ return {seats,action,effectiveAfterCall,contestableTo,pressure:Math.min(1,pressure)};
+}
+function studyCommitment(t,p,spot,tableRead){
+ const invested=p.paid,startingStack=p.stack+invested,afterCall=p.stack-spot.call;
+ const pct=amount=>Math.round(1000*amount/Math.max(1,startingStack))/10;
+ const effectiveAfterCall=tableRead.effectiveAfterCall,eligibleAfterCall=spot.eligible+spot.call;
+ const spr=eligibleAfterCall?Math.round(100*effectiveAfterCall/eligibleAfterCall)/100:null;
+ const paidPct=pct(invested+spot.call);
+ let ko,en;
+ if(!afterCall){
+   ko='이 콜에 남은 스택을 전부 씁니다. 내가 받을 수 있는 팟으로 계산한 필요 지분은 '+spot.odds+'%입니다.';
+   en='Calling uses your remaining stack. You need '+spot.odds+'% equity in the pot you can win.';
+ }else if(!effectiveAfterCall){
+   ko='현재 금액을 맞추면 추가로 서로 걸 수 있는 칩이 없습니다. 이미 낸 칩보다 이번 콜 가격이 기준입니다.';
+   en='Matching the price leaves no further chips at risk against these opponents. Compare the new cost with the pot you can win.';
+ }else if(t.stage===3){
+   ko='리버가 마지막 스트리트입니다. 이미 낸 '+money(invested)+'칩은 돌아오지 않으므로 이번 추가 투입만 비교합니다.';
+   en='This is the river. Treat your '+money(invested)+' chips already in the pot as sunk and evaluate the new cost.';
+ }else if(spr!==null&&spr<=1){
+   ko='베팅을 맞춘 뒤 유효 스택이 팟 한 번 이하입니다. 다음 베팅 한 번에 올인이 될 수 있지만 이미 낸 칩 때문에 콜할 필요는 없습니다.';
+   en='At most one eligible pot remains in effective stacks. The next bet can put a player all-in. Previous contributions do not oblige you to call.';
+ }else{
+   ko='현재 가격을 맞추면 시작 스택의 '+paidPct+'%가 들어갑니다. 다음 스트리트에서 서로 더 걸 수 있는 칩은 최대 '+money(effectiveAfterCall)+'입니다.';
+   en='Matching the price commits '+paidPct+'% of your starting stack. Up to '+money(effectiveAfterCall)+' more can go in against a live opponent.';
+ }
+ return {heroStack:p.stack,startingStack,invested,afterCall,investedPct:pct(invested),committedAfterCallPct:paidPct,
+   effectiveAfterCall,eligibleAfterCall,spr,reasonKo:ko,reasonEn:en};
+}
+function studySizing(t,p,spot,tableRead,commitment,texture,legal){
+ const opening=t.price===0,potAfterCall=spot.pot+spot.call,maxTo=p.bet+p.stack,minTo=Math.min(maxTo,t.price+t.raise);
+ let target,ko,en;
+ if(!legal){
+   if(p.stack<=spot.call){ko='남은 스택으로 가능한 최대 액션은 올인 콜입니다.';en='Your remaining stack only covers an all-in call.';}
+   else if(!t.ps.some(q=>q!==p&&!q.fold&&q.stack>0)){ko='남은 상대가 모두 올인이어서 추가로 올릴 수 없습니다.';en='Every opponent is all-in, so there is no further bet.';}
+   else {ko='짧은 올인 인상분이 정규 레이즈 폭에 못 미쳐 내 레이즈 권한이 다시 열리지 않았습니다.';en='The short all-in increase did not reopen your right to raise.';}
+   return {target:0,increase:0,pay:0,potAfterCall,potMultiple:0,minTo:0,maxTo:0,reasonKo:ko,reasonEn:en};
+ }
+ if(spot.preflopMix){
+   target=spot.preflopMix.raiseTo;
+   const raises=preflopRaiseCount(t);
+   if(raises){
+     const callers=tableRead.seats.filter(s=>s.role==='caller'&&s.streetBet===t.price).length;
+     const multiple=(target/t.price).toFixed(1);
+     ko='이전 '+money(t.price)+' 레이즈의 '+multiple+'배입니다. '+(callers?'이미 콜한 '+callers+'명도 플랍을 보려면 다시 내야 합니다.':
+       spot.preflopMix.raise>=50?'더 약한 패의 콜에서 가치를 얻고, 뒤의 선수가 싸게 합류할 기회를 줄입니다.':'상대가 같은 가격에 플랍을 볼 수 없도록 올리는 크기입니다.');
+     en=multiple+'× the '+money(t.price)+' raise. '+(callers?callers+(callers===1?' caller must':' callers must')+' pay again to see a flop.':
+       spot.preflopMix.raise>=50?'This gets value from weaker calls and makes it costly for others to join.':'This puts a price on seeing the flop for players who want to continue.');
+   }else{
+     const limps=tableRead.seats.filter(s=>s.role==='caller').length;
+     ko=limps?'앞선 림프 '+limps+'명에게 싸게 플랍을 주지 않도록 첫 레이즈를 키웁니다.':'첫 레이즈는 빅 블라인드와 유효 스택 깊이를 기준으로 잡습니다.';
+     en=limps?'The larger opening size charges '+limps+' limpers to see a flop.':'The opening size uses the big blind and effective stack depth.';
+   }
+ }else{
+   let fraction;
+   if(t.stage===3&&spot.equity>=80&&commitment.spr>=1.6&&tableRead.seats.length===1){
+     fraction=1.1;ko='헤즈업 리버에서 추정 지분이 높고 스택이 깊어 약한 완성 패의 콜에서 가치를 얻는 큰 사이즈입니다.';
+     en='Deep stacks and high estimated heads-up river equity support a larger value size against weaker made hands.';
+   }else if(spot.equity>=63&&(texture.wet>=.24||tableRead.seats.length>=3)){
+     fraction=.75;ko='강한 패로 여러 상대나 드로에 높은 콜 가격을 제시합니다.';en='With high equity, charge multiple opponents or drawing hands more to continue.';
+   }else if(texture.wet<.20&&tableRead.seats.length===1){
+     fraction=1/3;ko='드로가 적은 헤즈업 보드라 작은 사이즈로 약한 패의 콜을 받거나 적은 비용으로 압박합니다.';
+     en='A small size on this dry heads-up board keeps weaker calls in and risks less when bluffing.';
+   }else{
+     fraction=.5;ko='여러 상대 또는 드로 가능성이 있어 콜 가격을 올리되 중간 강도 패의 스택 노출을 줄입니다.';
+     en='A half-pot size charges draws or multiple opponents while controlling exposure with medium-strength hands.';
+   }
+   const step=Math.max(1,Math.round(t.bb/4));
+   target=t.price+Math.round(fraction*potAfterCall/step)*step;
+   const remainingSide=Math.min(maxTo,tableRead.contestableTo)-t.price;
+   if(remainingSide>0&&target-t.price>=remainingSide*.72&&spot.equity>=57){
+     target=t.price+remainingSide;ko+=' 추가 인상 뒤 남을 유효 스택이 작아 상대가 맞출 수 있는 금액까지 잡습니다.';
+     en+=' A smaller raise would leave little behind, so size up to the effective stack.';
+   }
+ }
+ const proposed=target;
+ target=Math.min(maxTo,Math.max(minTo,Math.min(target,tableRead.contestableTo)));
+ if(tableRead.contestableTo<=t.price){
+   ko='더 큰 레이즈에 맞출 상대 스택이 없습니다. 추가로 올리는 빈도는 0%입니다.';
+   en='No opponent can match a further increase. The recommended raise frequency is zero.';
+ }else if(target<proposed){ko+=' 상대가 실제로 맞출 수 있는 스택 한도를 적용했습니다.';en+=' The size is capped by the stacks that can match it.';}
+ else if(target>proposed){ko+=' 현재 최소 레이즈 금액을 적용했습니다.';en+=' The legal minimum determines the final size.';}
+ if(!opening&&maxTo<t.price+t.raise){ko+=' 정규 최소 인상에 못 미치는 짧은 올인입니다.';en+=' This is a short all-in below a full minimum raise.';}
+ const raiser=spot.preflopMix&&tableRead.seats.find(s=>s.role==='raiser'&&s.stack>0);
+ if(raiser&&target>raiser.streetBet&&tableRead.contestableTo>t.price){
+   const extra=money(Math.min(raiser.stack,target-raiser.streetBet));
+   ko+=' '+raiser.position+'의 추가 콜은 '+extra+'칩입니다.';
+   en+=' '+raiser.position+' faces '+extra+' more to call.';
+ }
+ const increase=target-t.price;
+ return {target,increase,pay:target-p.bet,potAfterCall,potMultiple:potAfterCall?Math.round(100*increase/potAfterCall)/100:0,
+   minTo,maxTo,reasonKo:ko,reasonEn:en};
+}
+function studyHandReason(t,p,spot,fold,raise,texture){
+ const passive=100-fold-raise,attack=raise>0&&raise>=passive&&raise>=fold;
+ if(spot.preflopMix){
+   const [hi,lo]=p.hole.map(c=>c%13).sort((a,b)=>b-a),ranks='23456789TJQKA';
+   const pair=hi===lo,suited=Math.floor(p.hole[0]/13)===Math.floor(p.hole[1]/13);
+   const hand=ranks[hi]+ranks[lo]+(pair?'':suited?'s':'o')+' · ';
+   let ko,en;
+   if(pair&&hi>=10){
+     const weaker=[['JJ','TT'],['QQ','JJ'],['KK','QQ']][hi-10].join('/');
+     if(attack){ko='프리미엄 페어입니다. '+weaker+' 같은 아래 페어가 콜하면 유리한 상태로 팟을 키울 수 있습니다.';
+       en='A premium pair. Raising for value builds the pot when lower pairs such as '+weaker+' call.';}
+     else if(fold>=50){ko='프리미엄 페어지만 상대 범위가 좁아졌습니다. 남은 인원과 큰 콜 가격이 부담됩니다.';
+       en='A premium pair faces narrowed ranges. The field size and price make this an expensive call.';}
+     else {ko='프리미엄 페어라 낮은 페어보다 앞섭니다. 현재 가격에서는 콜로 지분을 지키는 비중이 큽니다.';
+       en='This premium pair leads lower pairs. Calling at this price keeps its showdown equity.';}
+   }else if(pair){
+     ko=(hi>=5?'중간 포켓페어입니다.':'작은 포켓페어입니다.')+(attack?' 더 약한 패가 콜하거나 오버카드가 폴드하면 이득입니다.':fold>=50?' 셋이 될 기회만 보고 이 가격을 내기는 비쌉니다.':' 이미 쇼다운 가치가 있고 플랍에서 셋으로 개선될 수 있습니다.');
+     en=(hi>=5?'A medium pocket pair. ':'A small pocket pair. ')+(attack?'A raise benefits from weaker calls or folding out overcards.':fold>=50?'The price is steep for a hand that often needs a set.':'You already have showdown value and can flop a set.');
+   }else if(hi===12&&lo>=10){
+     ko='강한 에이스입니다. '+(attack?'더 약한 에이스의 콜을 받을 수 있고, 내 에이스가 상대 AA 조합을 줄입니다.':fold>=50?'여러 번 오른 팟에서는 더 좋은 에이스나 높은 페어가 남기 쉽습니다.':'높은 탑페어를 만들 수 있어 이 가격에 콜할 가치가 있습니다.');
+     en='A strong ace. '+(attack?'Weaker aces can call, and holding an ace blocks some AA.':fold>=50?'Repeated raises leave strong aces and high pairs in range.':'It can make a strong top pair for the current price.');
+   }else if(suited){
+     const connected=hi-lo<=2;
+     ko=(connected?'수티드 커넥터 계열이라 플러시와 스트레이트로 발전할 수 있습니다.':'같은 무늬여서 플러시로 발전할 수 있습니다.')+
+       (fold>=50?' 다만 지금 가격과 뒤의 액션을 감수할 만큼 강하지 않습니다.':attack?' 먼저 팟을 키우면 폴드도 받아낼 수 있습니다.':' 콜하면 팟을 키우지 않고 플랍을 봅니다.');
+     en=(connected?'Close suited cards can make straights or flushes. ':'Suited cards can make a flush. ')+
+       (fold>=50?'That potential rarely justifies this price and action still to come.':attack?'Aggression can also win the pot before the flop.':'A call keeps the pot smaller to see a flop.');
+   }else{
+     ko=fold>=50?'다른 무늬이고 한 장만 맞아도 더 높은 페어나 키커에 질 수 있어 이 자리에서는 폴드 비중이 높습니다.':
+       attack?'다른 무늬여도 현재 범위에서 먼저 압박해 블라인드나 약한 패의 폴드를 노립니다.':'다른 무늬라 플러시 가능성이 적습니다. 이 가격에 맞춰 팟을 작게 유지합니다.';
+     en=fold>=50?'An offsuit hand risks a higher pair or a better kicker even after pairing. Folding is frequent here.':
+       attack?'This offsuit hand can apply pressure and win the blinds or fold out weaker hands.':'Being offsuit limits flush potential. Calling keeps the pot smaller at this price.';
+   }
+   return [hand+ko,hand+en];
+ }
+ const categories=['high card','one pair','two pair','trips','a straight','a flush','a full house','quads','a straight flush'];
+ const cats=t.boards.map(board=>Math.floor(best(p.hole,board)/15**5));
+ let ko,en;
+ if(cats.length===2){
+   ko='위 보드 '+hands[cats[0]]+', 아래 보드 '+hands[cats[1]]+'. ';en='Top board '+categories[cats[0]]+', bottom board '+categories[cats[1]]+'. ';
+ }else{
+   const r=p.hole.map(c=>c%13),board=t.boards[0],boardHigh=Math.max(...board.map(c=>c%13));
+   const pocket=r[0]===r[1],cat=cats[0];
+   const overpair=cat===1&&pocket&&r[0]>boardHigh;
+   const topPair=cat===1&&r.includes(boardHigh)&&new Set(board.map(c=>c%13)).size===board.length;
+   const set=cat===3&&pocket&&board.filter(c=>c%13===r[0]).length===1;
+   ko=(overpair?'오버페어':topPair?'탑페어':set?'셋':hands[cat])+' · ';
+   en=(overpair?'Overpair':topPair?'Top pair':set?'Set':categories[cat])+' · ';
+ }
+ if(fold>=50){ko+='상대 범위와 비교하면 현재 콜 가격을 감당할 지분이 부족합니다.';en+='The estimated share against these ranges is too small for the price.';}
+ else if(texture.draw>=.20&&raise>0&&spot.equity<58){ko+=p.line?.lastCheck===t.stage?'드로로 체크레이즈를 섞으면 즉시 폴드를 받거나 다음 카드에서 개선될 수 있습니다.':'드로가 완성될 가능성이 있어 일부는 세미블러프로 압박합니다.';
+   en+=p.line?.lastCheck===t.stage?'A check-raise with this draw can win a fold or improve when called.':'The draw can improve when called, supporting occasional semi-bluffs.';}
+ else if(attack){ko+=p.line?.lastCheck===t.stage?'체크 뒤 베팅을 받았습니다. 약한 완성 패의 콜에서 가치를 얻는 체크레이즈입니다.':'약한 완성 패의 콜을 받을 수 있어 가치 베팅 비중이 높습니다.';
+   en+=p.line?.lastCheck===t.stage?'After checking into a bet, a value check-raise targets calls from weaker made hands.':'Weaker made hands can pay, favoring a value bet or raise.';}
+ else if(spot.call){ko+='현재 가격에 콜해 지분을 지키고 더 큰 팟을 만드는 횟수는 줄입니다.';en+='Calling preserves equity at this price and controls the size of the pot.';}
+ else {ko+='체크로 팟을 작게 유지할 수 있습니다.';en+='A free check keeps the pot under control.';}
+ return [ko,en];
+}
+// Fractional raises follow the table controls: the increase above the standing
+// bet is divided by the pot AFTER our call. It is not the raise-to total / pot.
+function liveStudyGuide(t,p){
+ const tableRead=studyTableRead(t,p),spot=studyDecision(t,p,tableRead),legal=canRaise(t,p);
+ const commitment=studyCommitment(t,p,spot,tableRead),tex={wet:0,draw:0};
+ if(t.stage)for(const b of t.boards){
+   const board=handTexture(p.hole,b);
+   tex.wet+=board.wet/t.boards.length;tex.draw+=board.draw/t.boards.length;
+ }
+ const sizing=studySizing(t,p,spot,tableRead,commitment,tex,legal);
+ let fold,raise;
+ if(spot.preflopMix){
+   ({fold,raise}=spot.preflopMix);
+ }else{
+   const share=spot.equity/100,river=t.stage===3,pressure=tableRead.pressure;
+   const playedLast=!tableRead.seats.some(s=>s.side==='after'&&s.stack>0);
+   // When all chips go in, equity is fully realized. With chips behind, deep
+   // out-of-position play and unresolved decisions discount a marginal call.
+   const futureRisk=!river&&commitment.spr!==null?cap(commitment.spr/4,0,1):0;
+   const realization=cap(1-futureRisk*((playedLast?.028:.112)+.016*(spot.opponents-1))-.09*pressure,.64,1);
+   const continueRate=spot.call?1/(1+Math.exp(-(share*realization-spot.odds/100)/.050)):1;
+   const value=cap((share-(spot.opponents>1?.53:.58))/.32,0,1);
+   const shallow=!river&&commitment.effectiveAfterCall>0&&commitment.spr<=1.2;
+   const bluff=(tableRead.action.allIn?0:.025+tex.draw*(playedLast?.55:.4))*(1-.45*pressure)*(shallow?.74:1);
+   const attack=cap(value*(.79+.08*pressure+(shallow?.09:0))+bluff+(playedLast?.025:0),0,.94);
+   fold=spot.call?Math.round(100*(1-continueRate)):0;
+   raise=legal?Math.round((100-fold)*attack):0;
+ }
+ if(!legal||tableRead.contestableTo<=t.price)raise=0;
+ let [mixReasonKo,mixReasonEn]=studyHandReason(t,p,spot,fold,raise,tex);
+ if(spot.call){
+   mixReasonKo+=' 콜 손익분기 '+spot.odds+'%.';
+   mixReasonEn+=' Calling needs '+spot.odds+'% equity.';
+ }
+ if(tableRead.action.raiseThreats){
+   mixReasonKo+=' '+(spot.call?'콜':'체크')+'하면 '+tableRead.action.raiseThreats+'명이 더 '+(t.price?'올릴':'베팅할')+' 수 있습니다.';
+   mixReasonEn+=' After your '+(spot.call?'call':'check')+', '+tableRead.action.raiseThreats+' can still '+(t.price?'raise.':'bet.');
+ }
+ return {pot:spot.pot,eligible:spot.eligible,call:spot.call,odds:spot.odds,equity:spot.equity,position:spot.position,
+   fold,passive:100-fold-raise,raise,canRaise:legal,raiseTo:sizing.target,opening:t.price===0,
+   allInRaise:legal&&sizing.target===p.bet+p.stack,allInCall:spot.call>0&&spot.call===p.stack,
+   title:spot.title,reason:spot.reason,
+   detail:{sizing,commitment,action:tableRead.action,seats:tableRead.seats,potLayers:spot.potLayers,cash:spot.cash,double:t.double,mixReasonKo,mixReasonEn}};
 }
 function handTexture(h,board){
  if(h.length===3){
@@ -1626,7 +1901,7 @@ function otherStep(t=g.ts[1]){
  else{t.phase='done';t.titleLeft=0;t.curtain=0;t.boardHold=0}
 }
 
-let g=null,state={wallet:50000,g:null,parked:[null,null,null],history:{},opt:{peek:true,voice:true,sound:true,timing:true,speed:1},last:''};
+let g=null,state={wallet:50000,g:null,parked:[null,null,null],history:{},opt:{peek:true,voice:true,sound:true,timing:true,speed:1,aiSpeed:'normal'},last:''};
 let notice='',spoken='',delay=0,backDelay=0,anim='',wait=0,raiseTo=0,buy=200000;
 function save(){} function draw(){} function msg(m){notice=m}
 function dailyResult(hero){
@@ -1748,6 +2023,52 @@ function autoNextRemaining(t){
  return Number.isFinite(t.autoNextLeft)?cap(t.autoNextLeft,0,DAILY_RESULT_SECONDS):DAILY_RESULT_SECONDS;
 }
 function botTurnKey(t){return [t.hand,t.stage,t.actor,t.price,t.pending.length].join('/')}
+const aiSpeeds=['realistic','normal','fast'];
+function realisticWait(t,p,clock){
+ const [kind,target]=clock.plan;
+ const roll=clock.tempoRoll,normal=clock.normalWait;
+ const call=Math.min(p.stack,owing(t,p));
+ if(kind==='fold')return normal<1.1?normal:normal*(.87+.37*roll);
+ if(kind==='call'&&!call)return .5+roll*1.25;
+
+ const bb=Math.max(1,t.bb);
+ let coveredTo=0,pot=0;
+ for(const seat of t.ps){
+   pot+=seat.paid;
+   if(seat!==p&&!seat.fold)coveredTo=Math.max(coveredTo,seat.stack+seat.bet);
+ }
+ // An overbet's uncalled excess will come back. Size the hesitation to the
+ // chips another player could actually win, including an all-in they posted.
+ const effective=Math.min(p.stack,Math.max(0,coveredTo-p.bet));
+ const invested=kind==='raise'?Math.max(t.price+t.raise,target)-p.bet:call;
+ const risk=Math.min(effective,invested),riskBB=risk/bb;
+ const price=call/Math.max(bb,pot+call);
+ const cold=kind==='call'&&t.stage===0&&t.price>bb&&p.actedAt==null&&
+   t.actor!==t.bbSeat&&t.actor!==t.sbSeat;
+ const behind=t.pending.filter(i=>i!==t.actor&&t.ps[i].stack>0&&!t.ps[i].fold).length;
+ const cheap=price<=.20&&riskBB<=3;
+ const committed=p.paid>=p.stack&&price<=.18;
+ if(kind==='call'&&(cheap||committed)&&roll<(cold?.22:.68))return .45+roll*.8;
+
+ const deep=cap((effective/bb-30)/100,0,1);
+ const big=cap(riskBB/28,0,1);
+ const relative=cap(risk/Math.max(1,p.stack),0,1);
+ const potPressure=cap(risk/Math.max(bb,pot),0,1.5);
+ let thought=normal*.84+.64+big*(2.2+2.8*deep)+2*relative+1.1*potPressure;
+ if(cold)thought+=.7+.24*Math.min(behind,4);
+ if(kind==='raise')thought+=.42+.45*roll;
+ // Keep the folded player's accelerated tournament flow, even on deep decisions.
+ if(dailyPace(t)==='folded')thought*=.50;
+ return cap(thought,.65,ACTION_SECONDS-.8);
+}
+function setDecisionPace(t,clock){
+ const speed=state.opt.aiSpeed;
+ let thought=clock.normalWait;
+ if(speed==='fast')thought/=2;
+ else if(speed==='realistic'&&clock.plan)thought=realisticWait(t,t.ps[t.actor],clock);
+ clock.actAt=clock.full-Math.min(ACTION_SECONDS-.8,thought);
+ clock.pace=speed;
+}
 function decisionClock(t){
  const actor=t.phase==='bet'&&!t.boardHold?t.ps[t.actor]:null;
  if(!actor||actor.id===-1)return null;
@@ -1756,17 +2077,27 @@ function decisionClock(t){
    const cost=Math.min(actor.stack,owing(t,actor));
    const pot=t.ps.reduce((sum,p)=>sum+p.paid,0);
    const pressure=cost/Math.max(t.bb,pot);
-   const base=1.65+(actor.id%5)*.18+Math.random()*1.55;
+   const tempoRoll=Math.random();
+   const base=1.65+(actor.id%5)*.18+tempoRoll*1.55;
    const difficulty=base+Math.min(3.2,pressure*3.2)+(t.stage>=2?.7:0)+(cost>=actor.stack?1.2:0);
-   const pace=dailyPace(t),speed=state.opt.speed;
-   let thought;
-   if(pace==='cash')thought=Math.max(1.15,difficulty/speed);
-   else if(pace==='folded')thought=cap(difficulty*.34/speed,.8,1.65);
-   else thought=cap(difficulty*.76/speed,.94,5.2);
+   const pace=dailyPace(t);
+   let normalWait;
+   if(pace==='cash')normalWait=Math.max(1.15,difficulty);
+   else if(pace==='folded')normalWait=cap(difficulty*.34,.8,1.65);
+   else normalWait=cap(difficulty*.76,.94,5.2);
    const sameTurn=t.clock?.key===key;
    const elapsed=sameTurn?Math.max(0,t.clock.full-t.clock.left):0;
-   t.clock={key,full:ACTION_SECONDS,left:Math.max(0,ACTION_SECONDS-elapsed),actAt:ACTION_SECONDS-Math.min(ACTION_SECONDS-.8,thought)};
+   t.clock={key,full:ACTION_SECONDS,left:Math.max(0,ACTION_SECONDS-elapsed),normalWait,tempoRoll};
+   setDecisionPace(t,t.clock);
+ }else if(!Number.isFinite(t.clock.normalWait)){
+   // Old saves already sampled a deadline, and may even store an action. Keep
+   // both until the user changes speed instead of consuming another RNG draw.
+   const clock=t.clock,oldFast=state.opt.speed===2;
+   clock.normalWait=(clock.full-clock.actAt)*(oldFast?2:1);
+   clock.tempoRoll=cap(clock.normalWait/ACTION_SECONDS,0,1);
+   clock.pace=oldFast?'fast':'normal';
  }
+ if(t.clock.pace!==state.opt.aiSpeed)setDecisionPace(t,t.clock);
  return t.clock;
 }
 function botActWhenDue(t,dt){
@@ -1783,9 +2114,10 @@ function botActWhenDue(t,dt){
        let pace=g.cash?1:.88;
        if(hero?.fold)pace=.66;
        const release=.55+(t.ps[t.actor].id%4)*.055+Math.random()*.32;
-       clock.actAt=clock.full-Math.max(.38,release*pace/state.opt.speed);
+       clock.normalWait=Math.max(.38,release*pace);
      }
    }
+   setDecisionPace(t,clock);
  }
  clock.left=Math.max(0,clock.left-dt);
  if(clock.left>clock.actAt)return;
@@ -2077,6 +2409,8 @@ function restoreActiveGame(){
 }
 function loadSession(data){
  state=JSON.parse(data);g=state.g||null;
+ state.opt??={peek:true,voice:true,sound:true,timing:true,speed:1};
+ if(!aiSpeeds.includes(state.opt.aiSpeed))state.opt.aiSpeed=state.opt.speed===2?'fast':'normal';
  state.parked=Array.isArray(state.parked)?state.parked:[null,null,null];
  if(g)state.parked[g.pub]=null;
  restoredParked=new Set([0,1,2].filter(pub=>state.parked[pub]));
@@ -2155,7 +2489,10 @@ function mobile(raw){let c=JSON.parse(raw),t=g?.ts[0],preFoldConsumed=false,venu
      state.opt.squeeze=!state.opt.squeeze;
      break;
    }
-   if(c.name==='speed')state.opt.speed=state.opt.speed===1?2:1;else if(['sound','voice','timing','peek'].includes(c.name))state.opt[c.name]=!state.opt[c.name];break}
+   if(c.name==='aiSpeed'){
+     if(aiSpeeds.includes(c.value))state.opt.aiSpeed=c.value;
+   }else if(c.name==='speed')state.opt.speed=state.opt.speed===1?2:1;
+   else if(['sound','voice','timing','peek'].includes(c.name))state.opt[c.name]=!state.opt[c.name];break}
  const rewardApplied=(c.op==='init'||c.op==='rewardedAd')&&applyRewardedAds(c.completedAds);
  const view=snapshot(c.op!=='step'||c.inspect===true||!g||g.entrants<=36);
  view.sessions=venueCards();

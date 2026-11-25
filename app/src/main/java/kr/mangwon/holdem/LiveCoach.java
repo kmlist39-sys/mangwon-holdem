@@ -12,8 +12,9 @@ final class LiveCoach {
     private long pot,call;
     private JSONObject advice;
     private boolean expanded;
+    private final CoachDetails details;
 
-    LiveCoach(Arena arena){a=arena;}
+    LiveCoach(Arena arena){a=arena;details=new CoachDetails(a);}
 
     private boolean eligible(){
         return a.host.studyBilling.unlocked()&&a.g!=null&&!a.g.optBoolean("heroHoleHidden")&&a.g.optBoolean("own")
@@ -45,7 +46,9 @@ final class LiveCoach {
         });
     }
 
-    void toggle(){if(eligible()&&advice!=null){expanded=!expanded;a.invalidate();}}
+    void toggle(){if(eligible()&&advice!=null){expanded=!expanded;details.first();a.invalidate();}}
+    boolean reading(){return expanded&&eligible()&&a.panel.isEmpty();}
+    boolean select(String action){return reading()&&details.select(action);}
     boolean dismiss(){if(!expanded)return false;expanded=false;a.invalidate();return true;}
 
     private void text(String text,float x,float y,float size,int color,Paint.Align align){
@@ -74,30 +77,7 @@ final class LiveCoach {
         frequency(passive,advice.optInt("passive"),y,0xff92c7ad);y+=19;
         if(raising)frequency(aggressive,advice.optInt("raise"),y,0xffe5bd79);
         a.hit(680,246,829,358,"liveCoach");
-        if(expanded)detail(passive,aggressive);
+        if(expanded)details.draw(advice,pot,call);
     }
 
-    private void detail(String passive,String aggressive){
-        a.box(264,132,672,380,9,0xfc172a22);a.stroke(264,132,672,380,9,0xffa38b62,1.4f);
-        a.hit(264,132,672,380,"coachPanel");
-        a.stage.bet.fitted("현재 핸드 · "+advice.optString("position"),281,158,305,19,a.paper,Paint.Align.LEFT);
-        a.brass("닫기",595,139,66,"liveCoach");
-        a.line(281,170,651,170,0xff74694f,1);
-        a.txt("현재 팟 "+a.fmt(pot)+"   ·   "+(call>0?"콜 비용 "+a.fmt(call):"체크 가능"),282,191,15,a.paper);
-        a.txt("콜 필요 지분 "+advice.optDouble("odds")+"%   ·   추정 지분 "+advice.optInt("equity")+"%",282,212,14,a.gold);
-        int y=238;
-        if(call>0){option("폴드","추가 투입 0",advice.optInt("fold"),y);y+=21;}
-        option(advice.optBoolean("allInCall")?"올인 콜":passive,"추가 투입 "+a.fmt(call),advice.optInt("passive"),y);
-        if(advice.optBoolean("canRaise"))option(advice.optBoolean("allInRaise")?"올인":aggressive,
-            "총 "+a.fmt(advice.optLong("raiseTo")),advice.optInt("raise"),y+21);
-        a.line(281,290,651,290,0xff645d47,1);
-        a.stage.bet.fitted(advice.optString("title"),282,309,367,15,a.gold,Paint.Align.LEFT);
-        a.wrapped(advice.optString("reason"),282,a.en?322:328,366,a.en?11:12,a.paper,a.en?3:2);
-        String note=advice.optLong("eligible")<pot&&call>0?"참여 가능 팟 "+a.fmt(advice.optLong("eligible"))+" 기준":"공개 액션과 상대 범위를 바탕으로 계산";
-        a.stage.bet.fitted("학습용 추정 빈도 · "+note,282,369,365,11,a.muted,Paint.Align.LEFT);
-    }
-    private void option(String name,String amount,int percent,int y){
-        text(name,282,y,14,a.paper,Paint.Align.LEFT);a.txt(amount,380,y,13,a.muted);
-        text(percent+"%",650,y,15,a.gold,Paint.Align.RIGHT);
-    }
 }

@@ -514,28 +514,43 @@ public final class Arena extends View {
  switch(panel){case "entry":heading=pubs[venue];break;case "settings":heading="게임 설정";break;case "shop":heading="포인트 충전";break;case "confirm":heading="모의 충전";break;case "pause":heading="일시정지";break;case "surrender":heading="포기하고 나가기";break;case "raise":heading="레이즈 금액";break;case "result":heading="테이블 정산";break;}
  text(heading,l+27,84,28,paper,title,Paint.Align.LEFT);brass("닫기",r-84,55,61,"close");
  if(panel.equals("entry"))cashBuyIn();
- else if(panel.equals("settings")){
-     String[] ids={"sound","voice","timing","speed"},labels={"카드와 칩 효과음","한국어 딜러 음성","내 차례 제한 시간","진행 속도"};int[] rows={111,155,271,316};
-     for(int i=0;i<ids.length;i++){
-         int y=rows[i];txt(labels[i],265,y+25,18,paper);
-         String val=i==3?(opt.optInt("speed")==1?"기본":"빠르게"):opt.optBoolean(ids[i])?"켜짐":"꺼짐";
-         key(val,675,y,127,39,"opt:"+ids[i],0);
-     }
-     txt(host.dealerVoice.status(),265,212,15,muted);
-     key("딜러 미리 듣기",261,222,192,36,"voiceSample",0);
-     key("개인정보처리방침",500,222,302,36,"privacyPolicy",0);
-     line(264,263,804,263,0xff52624f,1);
-     txt(getResources().getString(R.string.squeeze_setting),265,387,18,paper);
-     boolean squeeze=opt.optBoolean("squeeze");
-     key(getResources().getString(squeeze?R.string.squeeze_on:R.string.squeeze_off),675,362,127,39,"opt:squeeze",squeeze?1:0);
-     hit(257,358,808,402,"opt:squeeze");
-     stage.bet.fitted(getResources().getString(R.string.squeeze_setting_detail),265,414,534,14,muted,Paint.Align.LEFT);
-     brass("GTO 홀덤 공부",501,432,301,"gtoStore");
- }
+ else if(panel.equals("settings"))settingsPanel();
  else if(panel.equals("pause"))ExitPanel.pause(this);
  else if(panel.equals("surrender"))ExitPanel.confirm(this);
  else if(panel.equals("raise")&&g!=null){mid(fmt(raise),540,198,47,gold);mid("이번 라운드 총 베팅액",540,225,15,muted);bar(295,266,785,"amount",g.optInt("min"),g.optInt("max"),raise);String[] ns={"최소","½ 팟","팟","올인"};for(int i=0;i<4;i++)key(ns[i],277+i*132,310,118,39,"size"+i,0);key("레이즈 확정",400,389,280,54,"commit",1);}
  else if(panel.equals("result")){wrapped(snapshot.optString("last"),272,192,540,23,paper,3);txt("현재 지갑  "+fmt(snapshot.optInt("wallet"))+" P",272,299,21,gold);key("로비로",400,379,280,54,"close",1);stage.rebuys.ticket();}
+ }
+ void settingsPanel(){
+     String speed=opt.optString("aiSpeed",opt.optInt("speed",1)==2?"fast":"normal");
+     boolean realistic="realistic".equals(speed), fast="fast".equals(speed);
+     txt("게임 속도",265,142,19,paper);
+     key("리얼리티",417,115,124,41,"aiSpeed:realistic",realistic?1:0);
+     key("보통",548,115,124,41,"aiSpeed:normal",!realistic&&!fast?1:0);
+     key("빠르게",679,115,124,41,"aiSpeed:fast",fast?1:0);
+     String hint=realistic?"AI가 큰 베팅에는 오래 고민하고, 확실한 콜은 바로 받습니다.":
+             fast?"AI의 고민 시간이 보통의 절반으로 줄어듭니다.":"AI가 기존 속도로 콜과 레이즈를 결정합니다.";
+     stage.bet.fitted(hint,265,177,536,14,muted,Paint.Align.LEFT);
+     line(264,187,804,187,0xff52624f,1);
+
+     txt("카드와 칩 효과음",265,219,16,paper);
+     key(opt.optBoolean("sound")?"켜짐":"꺼짐",438,193,79,39,"opt:sound",0);
+     txt("한국어 딜러 음성",543,219,16,paper);
+     key(opt.optBoolean("voice")?"켜짐":"꺼짐",724,193,79,39,"opt:voice",0);
+     stage.bet.fitted(host.dealerVoice.status(),265,258,366,14,muted,Paint.Align.LEFT);
+     brass("딜러 미리 듣기",645,236,158,"voiceSample");
+
+     txt("내 차례 제한 시간",265,303,16,paper);
+     key(opt.optBoolean("timing")?"켜짐":"꺼짐",438,277,79,39,"opt:timing",0);
+     txt("카드 딜링 속도",543,303,16,paper);
+     key(opt.optInt("speed",1)==2?"빠르게":"기본",724,277,79,39,"opt:speed",0);
+     line(264,325,804,325,0xff52624f,1);
+     boolean squeeze=opt.optBoolean("squeeze");
+     txt(getResources().getString(R.string.squeeze_setting),265,356,17,paper);
+     key(getResources().getString(squeeze?R.string.squeeze_on:R.string.squeeze_off),675,331,128,39,"opt:squeeze",squeeze?1:0);
+     hit(257,330,808,370,"opt:squeeze");
+     stage.bet.fitted(getResources().getString(R.string.squeeze_setting_detail),265,392,534,14,muted,Paint.Align.LEFT);
+     brass("개인정보처리방침",261,430,247,"privacyPolicy");
+     brass("GTO 홀덤 공부",520,430,283,"gtoStore");
  }
  void bar(float l,float y,float r,String key,int min,int max,int v){float f=max==min?0f:(v-min)/(float)(max-min);box(l,y-3,r,y+3,3,0xff586154);box(l,y-3,l+(r-l)*f,y+3,3,gold);reset(paper);c.drawCircle(l+(r-l)*f,y,10,p);hit(l-14,y-25,r+14,y+25,key);}
  void slider(String k,float x){if(k.equals("fundSlider")){cashDesk.slider(x);return;}if(k.equals("buy")){JSONObject level=cashStakes();if(level==null)return;int min=level.optInt("min"),max=fundedMax(level);float position=Math.max(0,Math.min(1,(x-297)/483));buy=Math.max(min,Math.min(max,(int)Math.round((min+(max-min)*position)/1000.0)*1000));if(x>=779)buy=max;}if(k.equals("amount")&&g!=null){int min=g.optInt("min"),max=g.optInt("max");raise=Math.max(min,Math.min(max,(int)Math.round((min+(max-min)*Math.max(0,Math.min(1,(x-295)/490)))/100.0)*100));if(x>=784)raise=max;}}
@@ -553,7 +568,9 @@ public final class Arena extends View {
  if(rebuyWarningVisible()){if(a.equals("ackRebuyNotice"))host.command(a,"session",g.optString("sessionId"));return;}
  if(a.equals("tableSqueeze")||a.equals("opt:squeeze")){holeSqueeze.toggle(a.equals("tableSqueeze"));return;}
  if(a.equals("voiceSample")){host.dealerVoice.preview();return;}
+ if(a.startsWith("aiSpeed:")){host.command("option","name","aiSpeed","value",a.substring("aiSpeed:".length()));return;}
  if(a.equals("liveCoach")){liveCoach.toggle();return;}
+ if(liveCoach.select(a))return;
  if(a.equals("coachPanel"))return;
  if(a.equals("privacyPolicy")){PrivacyPolicy.show(host);return;}
  if(a.equals("gtoStore")){

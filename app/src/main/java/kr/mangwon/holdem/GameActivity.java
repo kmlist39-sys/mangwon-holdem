@@ -176,7 +176,7 @@ public final class GameActivity extends Activity {
         }
         if(!pending&&now-lastTick>=180){
             double clockDt=(now-lastTick)/1000.0;lastTick=now;
-            command("step","dt",Math.min(.7,clockDt),"clockDt",clockDt,"inspect",arena.panel.equals("tables"),"holdTable",arena.deal.running()||arena.panel.equals("wagers")||arena.panel.equals("receipt")||arena.panel.equals("profile")||now<talkingUntil);
+            command("step","dt",Math.min(.7,clockDt),"clockDt",clockDt,"inspect",arena.panel.equals("tables")||arena.liveCoach.reading(),"holdTable",arena.deal.running()||arena.panel.equals("wagers")||arena.panel.equals("receipt")||arena.panel.equals("profile")||now<talkingUntil);
         }
     }
     int fx(String key,float volume){Integer id=soundIds.get(key);return id!=null&&ready.contains(id)&&active?sounds.play(id,volume,volume,1,0,1f):0;}
