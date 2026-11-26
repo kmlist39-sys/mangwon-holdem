@@ -59,7 +59,7 @@ public final class Arena extends View {
  boolean rebuyWarningVisible(){return g!=null&&screen.equals("table")&&panel.isEmpty()&&g.optBoolean("rebuyNoticePending");}
  boolean tableOpen(){return screen.equals("table")&&(panel.isEmpty()||panel.equals("tables")||panel.equals("wagers")||panel.equals("receipt")||panel.equals("profile"))&&g!=null&&!rebuyWarningVisible();}
  boolean live(){return tableOpen()&&!deal.running();}
- boolean back(){holeSqueeze.cancel();if(cashDesk.back())return true;if(panel.isEmpty()&&liveCoach.dismiss())return true;if(pubMenu.arrival.back())return true;if(attendance.dismiss())return true;if(rebuyWarningVisible()){host.command("ackRebuyNotice","session",g.optString("sessionId"));return true;}if(intro.blocking())return intro.back();if(tournamentBanner.showing())return true;if(panel.equals("shop"))host.rewardAds.leave();if(!panel.isEmpty()){if(panel.equals("surrender"))panel="pause";else if(panel.equals("gtoSample")||panel.equals("gtoReview"))panel="gtoStore";else if(panel.equals("gtoStore"))panel=studyReturn;else if(panel.equals("profile"))panel=profileReturn;else if(panel.equals("confirm"))panel="shop";else if(panel.equals("shop")&&shopFromEntry){shopFromEntry=false;panel="entry";}else panel="";invalidate();return true;}if(screen.equals("table")){panel="pause";invalidate();return true;}return false;}
+ boolean back(){holeSqueeze.cancel();if(honors.dismiss())return true;if(cashDesk.back())return true;if(panel.isEmpty()&&liveCoach.dismiss())return true;if(pubMenu.arrival.back())return true;if(attendance.dismiss())return true;if(rebuyWarningVisible()){host.command("ackRebuyNotice","session",g.optString("sessionId"));return true;}if(intro.blocking())return intro.back();if(tournamentBanner.showing())return true;if(panel.equals("shop"))host.rewardAds.leave();if(!panel.isEmpty()){if(panel.equals("surrender"))panel="pause";else if(panel.equals("gtoSample")||panel.equals("gtoReview"))panel="gtoStore";else if(panel.equals("gtoStore"))panel=studyReturn;else if(panel.equals("profile"))panel=profileReturn;else if(panel.equals("confirm"))panel="shop";else if(panel.equals("shop")&&shopFromEntry){shopFromEntry=false;panel="entry";}else panel="";invalidate();return true;}if(screen.equals("table")){panel="pause";invalidate();return true;}return false;}
  String fmt(long n){
      String value=numbers.get(n);
      if(value==null){if(numbers.size()>=256)numbers.clear();value=commaFormat.format(n);numbers.put(n,value);}
@@ -242,7 +242,7 @@ public final class Arena extends View {
  static final float[][][] LAYOUT=new float[SEAT_X.length][][];
  static final Path[][] SEAT_MASKS=new Path[SEAT_X.length][];
  static{
-     for(int n=2;n<SEAT_X.length;n++){
+     for(int n=1;n<SEAT_X.length;n++){
          LAYOUT[n]=new float[n][];
          SEAT_MASKS[n]=new Path[n];
          LAYOUT[n][0]=new float[]{540,455};

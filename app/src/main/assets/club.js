@@ -1975,7 +1975,19 @@ const venueFees=[[50000,100000],[100000,150000,200000]];
 const venueTables=[[2,3,4],[12,24]];
 const mapoLargeFees=[100000,200000,500000];
 function tournamentFees(pub,tables){return pub===1&&tables===24?mapoLargeFees:venueFees[pub]}
-const championshipTickets={50000:{pub:1,tables:12,buyin:100000},100000:{pub:1,tables:24,buyin:200000}};
+// Map each starting field and paid entry tier to a specific Mapo event.
+const mangwonWinnerPasses={
+ 2:{50000:[12,100000],100000:[12,150000]},
+ 3:{50000:[12,150000],100000:[12,200000]},
+ 4:{50000:[12,200000],100000:[24,500000]}
+};
+function winnerPass(pub,tables,buyin){
+ const destination=pub===0&&mangwonWinnerPasses[tables]?.[buyin];
+ return destination?{pub:1,tables:destination[0],buyin:destination[1]}:null;
+}
+function ticketGroup(career,pub,tables,buyin){
+ return career.ticketGroups.find(group=>group.pub===pub&&group.tables===tables&&group.buyin===buyin);
+}
 function startingTables(game){
  return game.startTables||Math.ceil((game.entrants||0)/(game.capacity||9))||game.ts.length;
 }
@@ -1984,10 +1996,12 @@ function recordTournamentAward(career,result){
  const known=career.awards.find(row=>row.sessionId===result.sessionId);
  if(known){result.ticketAwarded=known.ticketAwarded;return false;}
  let ticketAwarded=null;
- const prize=result.pub===0&&result.rank===1&&!result.tied&&championshipTickets[result.buyin];
+ const prize=result.rank===1&&!result.tied&&winnerPass(result.pub,result.tables,result.buyin);
  if(prize){
    ticketAwarded={...prize,id:'champ-'+result.sessionId};
-   (career.ticketIds[prize.tables]??=[]).push(ticketAwarded.id);
+   const group=ticketGroup(career,prize.pub,prize.tables,prize.buyin);
+   if(group)group.ids.push(ticketAwarded.id);
+   else career.ticketGroups.push({...prize,ids:[ticketAwarded.id]});
  }
  result.ticketAwarded=ticketAwarded;
  const {sessionId,at,pub,tables,buyin,rank,tied,payout,fees,ticketSpent}=result;
@@ -1998,7 +2012,7 @@ function recordTournamentAward(career,result){
 }
 function tournamentCareer(){
  if(state.career)return state.career;
- const career=state.career={entries:0,rebuys:0,buyins:0,ticketValue:0,prizes:0,podium:[0,0,0],ticketIds:{},awards:[]};
+ const career=state.career={entries:0,rebuys:0,buyins:0,ticketValue:0,prizes:0,podium:[0,0,0],ticketGroups:[],awards:[]};
  // Earlier saves retain only the last result and seats still in progress.
  // Their original wallet already includes the payout. Rebuild the record only.
  const old=state.tournamentResult||state.lastExit;
@@ -2025,12 +2039,9 @@ function tournamentCareer(){
  return career;
 }
 function careerSummary(){
- const {prizes,buyins,ticketValue,entries,rebuys,podium,ticketIds,awards}=tournamentCareer();
- const tickets=[];
- for(const prize of Object.values(championshipTickets)){
-   const ids=ticketIds[prize.tables];
-   if(ids?.length)tickets.push({...prize,id:ids[0],count:ids.length});
- }
+ const {prizes,buyins,ticketValue,entries,rebuys,podium,ticketGroups,awards}=tournamentCareer();
+ const tickets=ticketGroups.filter(group=>group.ids.length).map(({pub,tables,buyin,ids})=>
+   ({pub,tables,buyin,id:ids[0],count:ids.length})).sort((a,b)=>a.pub-b.pub||a.tables-b.tables||a.buyin-b.buyin);
  return {prizes,buyins,ticketValue,entries,rebuys,podium,awardCount:awards.length,tickets};
 }
 function awardsPage(request){
@@ -2043,7 +2054,7 @@ const tournamentEntries=venueTables.map((fields,pub)=>{
    const initial=tables*9,payoutPercentages=fieldPercentages(initial);
    return {tables,initial,offers:tournamentFees(pub,tables).map(buyin=>{
      const prizeContributionPerEntry=prizeContribution(buyin),pool=initial*prizeContributionPerEntry;
-     return {buyin,winnerTicket:pub===0?championshipTickets[buyin]:null,rebuyFee:buyin,rebuyPrizeContribution:prizeContributionPerEntry,pool,prizeContributionRate,prizeContributionPerEntry,paidPlaces:payoutPercentages.length,payoutPercentages,payouts:prizeAmounts(pool,payoutPercentages)};
+     return {buyin,winnerTicket:winnerPass(pub,tables,buyin),rebuyFee:buyin,rebuyPrizeContribution:prizeContributionPerEntry,pool,prizeContributionRate,prizeContributionPerEntry,paidPlaces:payoutPercentages.length,payoutPercentages,payouts:prizeAmounts(pool,payoutPercentages)};
    })};
  });
  return {pub,...formats[0],formats,levelSeconds:blindLevelSeconds(pub),startStack:START_STACK,rebuyStack:REBUY_STACK};
@@ -2060,8 +2071,7 @@ function launch(pub,dbl,stake,seats,tables,cashLevel=0,ticketId){
  if(!Number.isSafeInteger(cost)||!validFee){notice='해당 펍의 바이인을 선택해 주세요';return}
  const career=tournamentCareer();
  const wantsTicket=ticketId!=null;
- const matching=wantsTicket&&Object.values(championshipTickets).find(p=>p.pub===pub&&p.tables===tableCount&&p.buyin===cost);
- const ids=matching&&career.ticketIds[tableCount];
+ const ids=wantsTicket&&!cash&&ticketGroup(career,pub,tableCount,cost)?.ids;
  const ticketIndex=ids?ids.indexOf(ticketId):-1;
  if(wantsTicket&&ticketIndex<0){notice='이 대회에서 사용할 수 있는 바이인권을 확인해 주세요';return}
  const charge=wantsTicket?0:cost;
@@ -2489,6 +2499,16 @@ function restoreActiveGame(){
 }
 function loadSession(data){
  state=JSON.parse(data);g=state.g||null;
+ if(state.career&&!state.career.ticketGroups){
+   // 0.8.8 kept only the unspent IDs by destination table count. Each table
+   // count had one face value then; historical award rows include spent passes.
+   const old=state.career.ticketIds||{};
+   state.career.ticketGroups=[];
+   for(const [tables,buyin] of [[12,100000],[24,200000]]){
+     if(old[tables]?.length)state.career.ticketGroups.push({pub:1,tables,buyin,ids:old[tables]});
+   }
+   delete state.career.ticketIds;
+ }
  state.opt??={peek:true,voice:true,sound:true,timing:true,speed:1};
  if(!aiSpeeds.includes(state.opt.aiSpeed))state.opt.aiSpeed=state.opt.speed===2?'fast':'normal';
  state.parked=Array.isArray(state.parked)?state.parked:[null,null,null];

@@ -26,10 +26,10 @@ final class TournamentHonors {
     private Bitmap room, pass, cups;
     private JSONObject career;
     private JSONArray awards;
-    private int request,page,pages,selected;
-    private boolean ticketTab,loading,loadFailed;
-    private String useId="";
-    private boolean entering;
+    private static final int HISTORY=0, PASSES=1, REWARDS=2;
+    private int request,page,pages,selected,tab,passPage;
+    private boolean loading,loadFailed,entering,fromCabinet;
+    private JSONObject pendingPass;
 
     TournamentHonors(Arena a){this.a=a;}
     private String l(String ko,String en){return a.en?en:ko;}
@@ -57,8 +57,16 @@ final class TournamentHonors {
         for(int i=0;i<count(own);i++){JSONObject t=own.optJSONObject(i);if(matches(t)&&t.optInt("count")>0)return t;}
         return null;
     }
-    void resetFunding(){useId="";entering=false;}
-    void answered(String change){if(!change.isEmpty())entering=false;}
+    void resetFunding(){pendingPass=null;entering=false;fromCabinet=false;}
+    void answered(String change){if(!change.isEmpty())resetFunding();}
+    boolean dismiss(){
+        if(pendingPass==null||!a.panel.equals("entry"))return false;
+        if(!entering){
+            if(fromCabinet){a.panel="honors";tab=PASSES;read(page);}
+            resetFunding();a.hits.clear();a.held="";a.invalidate();
+        }
+        return true;
+    }
     private Bitmap cups(){
         if(cups==null)cups=a.image("podium-trophies.webp");
         return cups;
@@ -80,7 +88,7 @@ final class TournamentHonors {
     }
     private void open(){
         if(room==null)room=a.image("honors-cabinet.webp");
-        ticketTab=false;selected=0;a.panel="honors";a.hits.clear();a.held="";
+        tab=HISTORY;passPage=0;selected=0;a.panel="honors";a.hits.clear();a.held="";
         read(0);
     }
     private void read(int requestedPage){
@@ -135,12 +143,12 @@ final class TournamentHonors {
         JSONObject row=awards==null?null:awards.optJSONObject(selected);
         int best=0;
         for(int i=0;i<3;i++){if(medals!=null&&medals.optInt(i)>0){best=i+1;break;}}
-        int heroRank=row!=null&&!ticketTab?row.optInt("rank"):best;
+        int heroRank=row!=null&&tab==HISTORY?row.optInt("rank"):best;
         if(heroRank>=1&&heroRank<=3)cup(heroRank,211,345,225,230);
-        else if(row!=null&&!ticketTab){
+        else if(row!=null&&tab==HISTORY){
             label(place(heroRank,row.optBoolean("tied")),212,252,216,54,GOLD,a.title,CENTER);
         }
-        boolean specific=row!=null&&!ticketTab;
+        boolean specific=row!=null&&tab==HISTORY;
         String caption=specific?event(row):best>0?l("최고 성적","Personal best"):l("트로피 진열대","Trophy shelf");
         label(caption,212,403,209,15,SOFT,a.normal,CENTER);
         String summary=specific?place(heroRank,row.optBoolean("tied"))+"  ·  "+points(row.optLong("payout")):
@@ -155,9 +163,12 @@ final class TournamentHonors {
         metric(734,l("총 바이인","Total buy-ins"),points(amount(stats,"buyins")),l("포인트 결제 · 리바인 포함","Points paid, including rebuys"));
         a.line(711,86,711,143,0x665d5143,1);
         a.line(391,158,1034,158,0xa88f7753,1);
-        tab(392,176,l("대회 입상 기록","Prize finishes"),!ticketTab,"honorsHistory");
-        tab(618,176,l("보유 바이인권","Entry passes")+"  "+passCount(tickets),ticketTab,"honorsTickets");
-        if(ticketTab)drawTickets(tickets);else drawRows();
+        tab(392,176,l("대회 입상 기록","Prize finishes"),tab==HISTORY,"honorsHistory");
+        tab(609,176,l("보유 바이인권","My passes")+"  "+passCount(tickets),tab==PASSES,"honorsTickets");
+        tab(826,176,l("우승 보상표","Winner's passes"),tab==REWARDS,"honorsRules");
+        if(tab==HISTORY)drawRows();
+        else if(tab==REWARDS||count(tickets)==0)drawRewards(tab==PASSES);
+        else drawTickets(tickets);
     }
     private void metric(float x,String name,String value,String hint){
         label(name,x,86,296,15,GOLD,a.bold,LEFT);
@@ -203,25 +214,54 @@ final class TournamentHonors {
             if(page+1<pages)a.brass("›",970,448,52,"honorsNext");
         }
     }
+    private void drawRewards(boolean empty){
+        JSONArray entries=a.snapshot.optJSONArray("tournamentEntries");
+        JSONObject mangwon=entries==null?null:entries.optJSONObject(0);
+        JSONArray formats=mangwon==null?null:mangwon.optJSONArray("formats");
+        if(count(formats)==0)return;
+        String heading=empty?l("보유권이 없습니다 · 망원동 우승 시 받는 마포구 바이인권","No passes yet · Win a Mangwon event to earn a Mapo pass")
+                            :l("망원동 대회 우승 시 받는 마포구 바이인권","Mapo entry passes awarded to Mangwon champions");
+        label(heading,394,240,633,17,IVORY,a.title,LEFT);
+        label(l("망원동 대회","Mangwon field"),394,273,119,14,SOFT,a.bold,LEFT);
+        JSONObject first=formats.optJSONObject(0);
+        JSONArray stakes=first==null?null:first.optJSONArray("offers");
+        for(int j=0;j<count(stakes);j++){
+            JSONObject offer=stakes.optJSONObject(j);
+            if(offer!=null)label(a.shortP(offer.optInt("buyin"))+l(" P 바이인"," P buy-in"),645+232*j,273,220,16,GOLD,a.bold,CENTER);
+        }
+        a.line(392,279,1027,279,0xaa8f7753,1);
+        for(int i=0;i<count(formats);i++){
+            JSONObject format=formats.optJSONObject(i);if(format==null)continue;
+            int y=283+65*i;
+            label(format.optInt("tables")+l("테이블"," tables"),394,y+34,127,18,IVORY,a.bold,LEFT);
+            JSONArray offers=format.optJSONArray("offers");
+            for(int j=0;j<count(offers);j++){
+                JSONObject offer=offers.optJSONObject(j),reward=offer==null?null:offer.optJSONObject("winnerTicket");
+                if(reward!=null)voucher(reward,534+232*j,y,222,60,"");
+            }
+            if(i+1<count(formats))a.line(393,y+63,1027,y+63,0x5c827258,1);
+        }
+        label(l("상금과 함께 지급 · 지정 대회 첫 바이인 1회","Awarded with your prize money · One entry to the listed event"),
+                394,498,630,14,SOFT,a.normal,LEFT);
+    }
     private void drawTickets(JSONArray own){
-        int n=count(own);
-        if(n==0){
-            voucher(12,100000,389,237,293,112,l("우승 보너스","Winner's bonus"));
-            label(l("보유한 바이인권이 없습니다.","No entry passes yet."),703,273,318,21,IVORY,a.title,LEFT);
-            label(l("망원동 5만 P 대회 우승 시","Win the 50K P Mangwon Daily"),703,308,318,15,SOFT,a.normal,LEFT);
-            label(l("마포구 12테이블 10만 P권을 받습니다.","to earn a Mapo 12-table 100K P pass."),703,333,318,15,SOFT,a.normal,LEFT);
-            return;
-        }
-        for(int i=0;i<n&&i<2;i++){
+        int n=count(own),lastPage=(n-1)/6;passPage=Math.min(passPage,lastPage);
+        label(a.savedVenue(1)==null?l("참가할 대회의 바이인권을 선택하세요.","Select a pass to enter its tournament.")
+                                  :l("마포구 대회 진행 중 · 선택하면 내 자리로 돌아갑니다.","Mapo tournament in progress · Select a pass to return to your seat."),
+              392,236,635,16,SOFT,a.normal,LEFT);
+        for(int i=passPage*6;i<Math.min(n,passPage*6+6);i++){
             JSONObject ticket=own.optJSONObject(i);if(ticket==null)continue;
-            int y=222+i*121;
-            voucher(ticket,389,y,283,110,l("바이인 1회권","Single entry"));
-            boolean seated=a.savedVenue(ticket.optInt("pub"))!=null;
-            label(l("보유 ","Available  ")+ticket.optInt("count")+l("장",""),689,y+32,335,20,IVORY,a.bold,LEFT);
-            label(seated?l("진행 중인 마포구 대회가 있습니다.","You have an active Mapo tournament."):l("참가 시 지갑 차감 0 P","Wallet charge on entry  0 P"),689,y+58,335,15,SOFT,a.normal,LEFT);
-            if(!seated)a.brass(l("이 입장권으로 참가","Enter with this pass"),686,y+70,225,"honorsUse"+i);
+            int col=i%2,row=(i%6)/2,x=394+321*col,y=239+82*row;
+            String caption=a.en?"Available ×"+ticket.optInt("count"):"보유 "+ticket.optInt("count")+"장";
+            voucher(ticket,x,y,295,78,caption);
+            a.hit(x,y,x+295,y+78,"honorsUse"+i);
         }
-        label(l("한 장으로 지정 대회에 1회 참가할 수 있습니다. 리바인은 포인트로 결제합니다.","Each pass covers one entry to its listed event. Rebuys use wallet points."),391,489,640,14,SOFT,a.normal,LEFT);
+        label(l("리바인은 해당 대회의 참가비로 결제합니다.","Rebuys use the tournament's entry fee."),394,502,414,14,SOFT,a.normal,LEFT);
+        if(lastPage>0){
+            if(passPage>0)a.brass("‹",847,475,52,"honorsPrevPass");
+            label((passPage+1)+" / "+(lastPage+1),933,497,62,14,IVORY,a.nums,CENTER);
+            if(passPage<lastPage)a.brass("›",970,475,52,"honorsNextPass");
+        }
     }
     void voucher(JSONObject ticket,float x,float y,float w,float h,String caption){
         if(ticket==null)return;
@@ -235,20 +275,18 @@ final class TournamentHonors {
         if(pass!=null)a.photo(pass,l,t,l+tw,t+th);
         else{a.box(l,t,l+tw,t+th,5,0xff244637);a.stroke(l+4,t+4,l+tw-4,t+th-4,4,GOLD,1);}
         float cx=l+tw*.64f;
-        label(caption,cx,t+th*.31f,tw*.54f,Math.min(14,th*.20f),GOLD,a.bold,CENTER);
-        label(a.shortP(buyin)+" P",cx,t+th*.61f,tw*.54f,Math.min(29,th*.28f),IVORY,a.title,CENTER);
-        label(l("마포구","Mapo")+" · "+tables+l("테이블"," tables"),cx,t+th*.82f,tw*.54f,Math.min(15,th*.14f),IVORY,a.normal,CENTER);
+        boolean compact=caption.isEmpty();
+        if(!compact)label(caption,cx,t+th*.31f,tw*.56f,Math.min(14,th*.20f),GOLD,a.bold,CENTER);
+        label(a.shortP(buyin)+" P",cx,t+th*(compact?.49f:.61f),tw*.56f,Math.min(29,th*(compact?.34f:.28f)),IVORY,a.title,CENTER);
+        label(l("마포구","Mapo")+" · "+tables+l("테이블"," tables"),cx,t+th*(compact?.77f:.82f),tw*.61f,Math.min(15,th*(compact?.21f:.17f)),IVORY,a.normal,CENTER);
     }
     void entryFooter(JSONObject offer){
         JSONObject ticket=matchingTicket();
-        boolean requested=!useId.isEmpty(),use=requested&&ticket!=null&&useId.equals(ticket.optString("id"));
-        boolean unavailable=requested&&!use;
-        label(l("내 지갑  ","Wallet  ")+points(a.snapshot.optLong("wallet")),40,460,ticket==null?363:252,18,IVORY,a.bold,LEFT);
-        if(ticket!=null||unavailable){
-            a.key(l("포인트","Points"),293,431,106,38,"honorsPoints",use?0:1);
-            a.key(l("바이인권 ","Pass  × ")+(ticket==null?0:ticket.optInt("count"))+l("장",""),404,431,155,38,ticket==null?"":"honorsPass",use?1:0);
-            String charge=unavailable?l("결제 수단을 선택하세요.","Select a payment method."):l("지갑 차감  ","Wallet charge  ")+points(use?0:a.fee);
-            label(charge,573,455,205,16,use?GOLD:IVORY,a.bold,LEFT);
+        long wallet=a.snapshot.optLong("wallet");
+        label(l("내 지갑  ","Wallet  ")+points(wallet),40,460,280,18,IVORY,a.bold,LEFT);
+        if(ticket!=null){
+            String available=a.en?"Matching entry passes   ×"+ticket.optInt("count"):"사용 가능한 바이인권   "+ticket.optInt("count")+"장";
+            label(available,330,459,457,17,GOLD,a.bold,LEFT);
         }else{
             JSONObject bonus=offer.optJSONObject("winnerTicket");
             if(bonus!=null){
@@ -256,42 +294,74 @@ final class TournamentHonors {
                 label(bonusText,330,459,457,16,GOLD,a.bold,LEFT);
             }
         }
-        boolean can=use||a.snapshot.optLong("wallet")>=a.fee;
-        String text=entering?l("입장 중…","Entering…"):unavailable?l("사용한 입장권","Pass unavailable"):use?l("바이인권으로 착석","Use pass & enter"):can?a.shortP(a.fee)+l(" P 바이인 · 착석"," P · Enter"):l("포인트 충전","Get points");
-        a.key(text,806,432,236,58,entering||unavailable?"":can?"enter":"shop",unavailable?0:1);
+        boolean can=ticket!=null||wallet>=a.fee;
+        String text=entering?l("입장 중…","Entering…"):can?a.shortP(a.fee)+l(" P 바이인 · 착석"," P · Enter"):l("포인트 충전","Get points");
+        a.key(text,806,432,236,58,entering?"":can?"enter":"shop",1);
+        if(pendingPass!=null)drawPrompt(wallet);
+    }
+    private void drawPrompt(long wallet){
+        a.hits.clear();
+        a.box(0,0,1080,520,0,0xaa080d0b);
+        a.box(217,95,863,417,16,0xff17241f);
+        a.stroke(217,95,863,417,16,0xff997e51,1.5f);
+        label(l("바이인권을 사용하시겠습니까?","Use your entry pass?"),540,155,560,30,IVORY,a.title,CENTER);
+        voucher(pendingPass,254,181,272,108,l("바이인 1회권","Single entry"));
+        label(l("지갑 차감  0 P","Wallet charge  0 P"),555,216,252,23,GOLD,a.bold,LEFT);
+        label(l("내 지갑  ","Wallet  ")+points(wallet),555,249,255,17,IVORY,a.nums,LEFT);
+        label(l("사용하면 바이인권 1장이 차감됩니다.","Redeeming uses one matching pass."),555,276,255,14,SOFT,a.normal,LEFT);
+        a.line(258,305,822,305,0x8b837456,1);
+        String pay=wallet>=a.fee?(a.en?"Pay "+a.shortP(a.fee)+" P":a.shortP(a.fee)+" P로 결제"):l("포인트 부족","Insufficient points");
+        a.key(l("취소","Cancel"),311,341,139,47,entering?"":"honorsCancel",0);
+        a.key(pay,459,341,155,47,entering||wallet<a.fee?"":"honorsPay",0);
+        if(wallet<a.fee)a.box(459,341,614,388,20,0x6e18201a);
+        a.key(entering?l("입장 중…","Entering…"):l("바이인권 사용","Use pass"),624,341,181,47,entering?"":"honorsRedeem",1);
+    }
+    private void prompt(JSONObject ticket,boolean shortcut){
+        pendingPass=ticket;fromCabinet=shortcut;a.hits.clear();a.held="";a.invalidate();
     }
     void enter(){
-        if(entering)return;
-        if(a.enterExistingVenue(a.venue))return;
-        if(!useId.isEmpty()){
-            JSONObject ticket=matchingTicket();
-            if(ticket==null||!useId.equals(ticket.optString("id"))){
-                resetFunding();a.note(l("입장권 보유 수량을 확인해 주세요.","Check your pass availability."));return;
-            }
+        if(entering||pendingPass!=null||a.enterExistingVenue(a.venue))return;
+        JSONObject ticket=matchingTicket();
+        if(ticket!=null)prompt(ticket,false);
+        else if(a.snapshot.optLong("wallet")>=a.fee)submit("");
+    }
+    private void confirm(boolean redeem){
+        if(pendingPass==null||entering||!a.panel.equals("entry"))return;
+        if(a.enterExistingVenue(a.venue)){resetFunding();return;}
+        JSONObject current=matchingTicket();
+        if(current==null||!current.optString("id").equals(pendingPass.optString("id"))){
+            dismiss();a.note(l("바이인권 보유 수량을 다시 확인해 주세요.","Please check your pass availability."));return;
         }
+        if(!redeem&&a.snapshot.optLong("wallet")<a.fee)return;
+        submit(redeem?current.optString("id"):"");
+    }
+    private void submit(String ticketId){
         entering=true;
-        if(useId.isEmpty())a.host.command("enter","pub",a.venue,"buy",a.fee,"tables",a.selectedTournamentTables(),"fromLobby",true);
-        else a.host.command("enter","pub",a.venue,"buy",a.fee,"tables",a.selectedTournamentTables(),"ticketId",useId,"fromLobby",true);
+        a.hits.clear();a.held="";a.invalidate();
+        if(ticketId.isEmpty())a.host.command("enter","pub",a.venue,"buy",a.fee,"tables",a.selectedTournamentTables(),"fromLobby",true);
+        else a.host.command("enter","pub",a.venue,"buy",a.fee,"tables",a.selectedTournamentTables(),"ticketId",ticketId,"fromLobby",true);
     }
     boolean action(String id){
         if(!id.startsWith("honors"))return false;
         if(id.equals("honorsOpen")){open();return true;}
-        if(id.equals("honorsPoints")||id.equals("honorsPass")){
-            if(a.panel.equals("entry")&&!entering){JSONObject t=matchingTicket();useId=id.equals("honorsPass")&&t!=null?t.optString("id"):"";}
-            return true;
-        }
+        if(id.equals("honorsCancel")){dismiss();return true;}
+        if(id.equals("honorsPay")||id.equals("honorsRedeem")){confirm(id.equals("honorsRedeem"));return true;}
         if(!a.panel.equals("honors"))return true;
         if(id.equals("honorsRetry"))read(page);
-        else if(id.equals("honorsHistory"))ticketTab=false;
-        else if(id.equals("honorsTickets"))ticketTab=true;
+        else if(id.equals("honorsHistory"))tab=HISTORY;
+        else if(id.equals("honorsTickets")){tab=PASSES;passPage=0;}
+        else if(id.equals("honorsRules"))tab=REWARDS;
+        else if(id.equals("honorsNextPass"))passPage++;
+        else if(id.equals("honorsPrevPass"))passPage=Math.max(0,passPage-1);
         else if(id.equals("honorsNext")&&page+1<pages)read(page+1);
         else if(id.equals("honorsPrev")&&page>0)read(page-1);
         else if(id.startsWith("honorsRow"))selected=Integer.parseInt(id.substring("honorsRow".length()));
         else if(id.startsWith("honorsUse")){
             int index=Integer.parseInt(id.substring("honorsUse".length()));
             JSONArray own=groups(career);JSONObject t=own==null?null:own.optJSONObject(index);
-            if(t!=null&&t.optInt("pub")==1&&a.savedVenue(1)==null){
-                a.openVenue(1);a.tablesChoice[1]=t.optInt("tables");a.fee=t.optInt("buyin");useId=t.optString("id");
+            if(t!=null&&t.optInt("pub")==1){
+                if(a.enterExistingVenue(1))return true;
+                a.openVenue(1);a.tablesChoice[1]=t.optInt("tables");a.fee=t.optInt("buyin");prompt(t,true);
             }
         }
         a.invalidate();return true;

@@ -27,7 +27,7 @@ final class DealAnimation {
         lastFrame=android.os.SystemClock.uptimeMillis();
     }
     private int end(){return windup+(seats*cards-1)*interval+FLIGHT+TURN+100;}
-    boolean running(){return seats>0&&elapsed<end();}
+    boolean running(){return seats>=2&&elapsed<end();}
     void update(long now, boolean playing){
         long step=Math.max(0,Math.min(64,now-lastFrame));
         view.holeSqueeze.update(now,playing);
@@ -52,7 +52,7 @@ final class DealAnimation {
     }
     static float clamp(float v){return Math.max(0,Math.min(1,v));}
     void draw(JSONArray players,int hero,JSONArray hole){
-        if(seats!=players.length())return;
+        if(seats<2||seats!=players.length())return;
         final float ox=418,oy=92;
         if(running()){
             for(int k=0;k<4;k++)view.card(0,ox-19,oy-11-k*1.8f,31,43,-14,true);
