@@ -1879,7 +1879,9 @@ function wrap(rebuyDecision,voiceBusy=false){
    if(rebuyDecision===undefined){g.rebuyAsk=true;return}
    if(rebuyDecision){
      if(!canBuyBack(t)){g.rebuyAsk=true;notice='리바인에 필요한 포인트를 충전해 주세요.';return}
-      state.wallet-=g.buyin;registerRebuy(t,hero);hero.stack=REBUY_STACK;
+      const career=tournamentCareer();
+      state.wallet-=g.buyin;career.buyins+=g.buyin;career.rebuys++;
+      registerRebuy(t,hero);hero.stack=REBUY_STACK;
       g.exits=g.exits.filter(id=>id!==hero.id);
    }
  }
@@ -1928,7 +1930,7 @@ function exitQuote(){
  }else if(settled&&(!stack&&g.exits.includes(-1)||stack>0&&g.entrants-g.exits.length===1)){
    const result=dailyResult(hero);kind='ranked';refund=result.prize;place=result.place;tied=result.tied;
  }
- const fees=g.cash?(hero.totalBuyins??g.buyin):g.buyin+paidTournamentRebuys(g,hero);
+ const fees=g.cash?(hero.totalBuyins??g.buyin):(g.ticketSpent?0:g.buyin)+paidTournamentRebuys(g,hero);
  if(!g.exitId){
    state.visitCount=(state.visitCount||0)+1;
    g.exitId=[g.pub,state.visitCount.toString(36),Date.now().toString(36),Math.floor(Math.random()*1e9).toString(36)].join('-');
@@ -1954,6 +1956,7 @@ function surrender(token){
 
 function finish(text,payout,source='complete'){
  if(!g.cash){
+   const career=tournamentCareer();
    for(const t of g.ts)flushTournamentEvents(t);
    if(source!=='surrender')state.lastExit={pub:g.pub,...exitQuote()};
    const q=state.lastExit,rank=q.place||0,main=g.ts[0],percentages=prizePlan(g).percentages;
@@ -1962,7 +1965,9 @@ function finish(text,payout,source='complete'){
    state.tournamentResult={sessionId:g.exitId,pub:g.pub,rank,tied:!!q.tied,payout,pool:g.pool,
      type:!rank?'withdrawn':rank===1?'winner':payout>0?'placed':'eliminated',reason,
      initial:g.entrants,entries:tournamentEntryCount(g),fees:q.fees,paidPlaces:percentages.length,
-     payoutPercentages:percentages,payouts:prizeAmounts(g.pool,percentages)};
+     payoutPercentages:percentages,payouts:prizeAmounts(g.pool,percentages),
+     at:Date.now(),tables:startingTables(g),buyin:g.buyin,ticketSpent:g.ticketSpent||0};
+   if(!recordTournamentAward(career,state.tournamentResult))payout=0;
  }
  state.wallet+=payout;state.last=text;notice=text;g=null;
 }
@@ -1970,17 +1975,80 @@ const venueFees=[[50000,100000],[100000,150000,200000]];
 const venueTables=[[2,3,4],[12,24]];
 const mapoLargeFees=[100000,200000,500000];
 function tournamentFees(pub,tables){return pub===1&&tables===24?mapoLargeFees:venueFees[pub]}
+const championshipTickets={50000:{pub:1,tables:12,buyin:100000},100000:{pub:1,tables:24,buyin:200000}};
+function startingTables(game){
+ return game.startTables||Math.ceil((game.entrants||0)/(game.capacity||9))||game.ts.length;
+}
+function recordTournamentAward(career,result){
+ if(!result.rank||(!result.payout&&result.rank>3))return true;
+ const known=career.awards.find(row=>row.sessionId===result.sessionId);
+ if(known){result.ticketAwarded=known.ticketAwarded;return false;}
+ let ticketAwarded=null;
+ const prize=result.pub===0&&result.rank===1&&!result.tied&&championshipTickets[result.buyin];
+ if(prize){
+   ticketAwarded={...prize,id:'champ-'+result.sessionId};
+   (career.ticketIds[prize.tables]??=[]).push(ticketAwarded.id);
+ }
+ result.ticketAwarded=ticketAwarded;
+ const {sessionId,at,pub,tables,buyin,rank,tied,payout,fees,ticketSpent}=result;
+ career.awards.push({sessionId,at,pub,tables,buyin,rank,tied:!!tied,payout,fees,ticketSpent,ticketAwarded});
+ career.prizes+=payout;
+ if(rank<=3)career.podium[rank-1]++;
+ return true;
+}
+function tournamentCareer(){
+ if(state.career)return state.career;
+ const career=state.career={entries:0,rebuys:0,buyins:0,ticketValue:0,prizes:0,podium:[0,0,0],ticketIds:{},awards:[]};
+ // Earlier saves retain only the last result and seats still in progress.
+ // Their original wallet already includes the payout. Rebuild the record only.
+ const old=state.tournamentResult||state.lastExit;
+ if(old&&(old.pub===0||old.pub===1)&&Number.isSafeInteger(old.fees)){
+   const result=state.tournamentResult||{pub:old.pub,rank:old.place||0,tied:old.tied,payout:old.refund||0,fees:old.fees};
+   const tables=result.tables||(result.initial?Math.ceil(result.initial/9):0);
+   const knownFees=tournamentFees(result.pub,tables);
+   // Some older prize pools contained full-price or mixed-price rebuys.
+   // An exact personal entry and the advertised pool corroborate the stake.
+   const buyin=result.buyin||knownFees.find(fee=>result.fees===fee&&result.entries>0&&result.pool===result.entries*prizeContribution(fee))||0;
+   career.entries++;career.buyins+=result.fees;
+   const row={...result,at:result.at||0,sessionId:result.sessionId||'legacy-result',tables,buyin,ticketSpent:0};
+   recordTournamentAward(career,row);
+   if(state.tournamentResult&&row.ticketAwarded)state.tournamentResult.ticketAwarded=row.ticketAwarded;
+ }
+ for(const game of [g,...(state.parked||[])]){
+   if(!game||game.cash)continue;
+   const hero=game.ts[0]?.ps.find(p=>p.id===-1);
+   if(!hero)continue;
+   career.entries++;career.rebuys+=rebuyCountOf(hero);
+   career.buyins+=(game.ticketSpent?0:(game.buyin||50000))+paidTournamentRebuys(game,hero);
+   career.ticketValue+=game.ticketSpent||0;
+ }
+ return career;
+}
+function careerSummary(){
+ const {prizes,buyins,ticketValue,entries,rebuys,podium,ticketIds,awards}=tournamentCareer();
+ const tickets=[];
+ for(const prize of Object.values(championshipTickets)){
+   const ids=ticketIds[prize.tables];
+   if(ids?.length)tickets.push({...prize,id:ids[0],count:ids.length});
+ }
+ return {prizes,buyins,ticketValue,entries,rebuys,podium,awardCount:awards.length,tickets};
+}
+function awardsPage(request){
+ const career=careerSummary(),rows=state.career.awards,pages=Math.max(1,Math.ceil(rows.length/5));
+ const page=Number.isSafeInteger(request)?cap(request,0,pages-1):0,end=rows.length-page*5;
+ return {career,page,pages,awards:rows.slice(Math.max(0,end-5),end).reverse()};
+}
 const tournamentEntries=venueTables.map((fields,pub)=>{
  const formats=fields.map(tables=>{
    const initial=tables*9,payoutPercentages=fieldPercentages(initial);
    return {tables,initial,offers:tournamentFees(pub,tables).map(buyin=>{
      const prizeContributionPerEntry=prizeContribution(buyin),pool=initial*prizeContributionPerEntry;
-     return {buyin,rebuyFee:buyin,rebuyPrizeContribution:prizeContributionPerEntry,pool,prizeContributionRate,prizeContributionPerEntry,paidPlaces:payoutPercentages.length,payoutPercentages,payouts:prizeAmounts(pool,payoutPercentages)};
+     return {buyin,winnerTicket:pub===0?championshipTickets[buyin]:null,rebuyFee:buyin,rebuyPrizeContribution:prizeContributionPerEntry,pool,prizeContributionRate,prizeContributionPerEntry,paidPlaces:payoutPercentages.length,payoutPercentages,payouts:prizeAmounts(pool,payoutPercentages)};
    })};
  });
  return {pub,...formats[0],formats,levelSeconds:blindLevelSeconds(pub),startStack:START_STACK,rebuyStack:REBUY_STACK};
 });
-function launch(pub,dbl,stake,seats,tables,cashLevel=0){
+function launch(pub,dbl,stake,seats,tables,cashLevel=0,ticketId){
  if(g||![0,1,2].includes(pub))return;
  const cash=pub===2,limits=cashLevels[cashLevel];
  const tableCount=cash?1:(tables??venueTables[pub][0]);
@@ -1990,16 +2058,28 @@ function launch(pub,dbl,stake,seats,tables,cashLevel=0){
  const cost=stake??(cash?limits.min:fees[0]);
  const validFee=cash?cost>=limits.min&&cost<=limits.max:fees.includes(cost);
  if(!Number.isSafeInteger(cost)||!validFee){notice='해당 펍의 바이인을 선택해 주세요';return}
- if(cost>state.wallet){notice='바이인 잔액이 부족합니다';return}
+ const career=tournamentCareer();
+ const wantsTicket=ticketId!=null;
+ const matching=wantsTicket&&Object.values(championshipTickets).find(p=>p.pub===pub&&p.tables===tableCount&&p.buyin===cost);
+ const ids=matching&&career.ticketIds[tableCount];
+ const ticketIndex=ids?ids.indexOf(ticketId):-1;
+ if(wantsTicket&&ticketIndex<0){notice='이 대회에서 사용할 수 있는 바이인권을 확인해 주세요';return}
+ const charge=wantsTicket?0:cost;
+ if(charge>state.wallet){notice='바이인 잔액이 부족합니다';return}
  const capacity=cash&&seats!==9?6:9;
  const entrants=capacity*tableCount,stack=cash?cost:START_STACK;
  const ps=[player(-1,stack),...cast(pub,entrants-1).map(id=>player(id,stack))],ts=[];
  if(cash)for(const p of ps)cashFund(p,p.id===-1?cost:cashBuyin(limits));
  for(let i=0;i<tableCount;i++)ts.push(table(ps.slice(i*capacity,(i+1)*capacity),i+1));
- state.wallet-=cost;state.lastExit=null;state.tournamentResult=null;
+ state.wallet-=charge;state.lastExit=null;state.tournamentResult=null;
  g={buyin:cost,capacity,entrants,pub,double:cash&&dbl,cash,ts,elapsed:0,breakLeft:0,rested:false,bank:45,pool:cash?0:entrants*prizeContribution(cost),exits:[],count:0,rebuyAsk:false,stage:'playing',revealed:false};
  if(cash)g.cashLevel=cashLevel;
- else{g.clockLevelSeconds=blindLevelSeconds(pub);g.entryCount=entrants;g.rebuyChips=0;prizePlan(g,true);}
+ else{
+   g.clockLevelSeconds=blindLevelSeconds(pub);g.entryCount=entrants;g.rebuyChips=0;g.startTables=tableCount;
+   career.entries++;career.buyins+=charge;
+   if(wantsTicket){ids.splice(ticketIndex,1);g.ticketSpent=cost;career.ticketValue+=cost;}
+   prizePlan(g,true);
+ }
  newRound();delay=.8;
 }
 
@@ -2299,7 +2379,7 @@ function purchasePack(id,sequence){
 }
 function snapshot(includeSideSeats=true){
  if(g)for(const table of g.ts)accountFinished(table);
- let v={study:state.lastStudy||null,cashier:cashierOffers,purchaseSequence:state.purchaseSequence||0,rewardedViews:state.rewardedViews||0,rewardEligible:state.wallet<cashierOffers.reward.maxWallet,cashLevels,prizeSchedules,prizeContributionRate,tournamentEntries,tournamentResult:state.tournamentResult||null,wallet:state.wallet,opt:state.opt,last:state.last,lastExit:state.lastExit||null,notice,spoken,g:null};if(!g)return v;let t=g.ts[0],hero=t.ps.find(p=>p.id===-1),own=t.phase==='bet'&&!t.boardHold&&t.ps[t.actor]?.id===-1;
+ let v={career:careerSummary(),study:state.lastStudy||null,cashier:cashierOffers,purchaseSequence:state.purchaseSequence||0,rewardedViews:state.rewardedViews||0,rewardEligible:state.wallet<cashierOffers.reward.maxWallet,cashLevels,prizeSchedules,prizeContributionRate,tournamentEntries,tournamentResult:state.tournamentResult||null,wallet:state.wallet,opt:state.opt,last:state.last,lastExit:state.lastExit||null,notice,spoken,g:null};if(!g)return v;let t=g.ts[0],hero=t.ps.find(p=>p.id===-1),own=t.phase==='bet'&&!t.boardHold&&t.ps[t.actor]?.id===-1;
  updateBlindNotices();
  const boundary=afterHand(t);
  const stats=g.cash?null:tournamentStats(t,hero);
@@ -2372,7 +2452,7 @@ function enterVenue(c){
    state.lastExit=null;state.tournamentResult=null;
    return 'resumed';
  }
- launch(c.pub,c.double,c.buy,c.seats,c.tables,c.cashLevel);
+ launch(c.pub,c.double,c.buy,c.seats,c.tables,c.cashLevel,c.ticketId);
  if(g)return 'entered';
  if(previous)takeParkedSeat(previous.pub);
  return 'denied';
@@ -2444,6 +2524,7 @@ function prepareAttendance(day){
  return JSON.stringify({session:JSON.stringify({...state,g,attendanceDay:day,attendanceStreak:offer.streak,wallet})});
 }
 function mobile(raw){let c=JSON.parse(raw),t=g?.ts[0],preFoldConsumed=false,venueChange='';
+ if(c.op==='awards')return JSON.stringify(awardsPage(c.page));
  if(c.op==='squeezePreview')return JSON.stringify({squeezePreview:squeezeCardFor(t,c)});
  notice='';spoken='';
  if(c.op==='liveGuide'){

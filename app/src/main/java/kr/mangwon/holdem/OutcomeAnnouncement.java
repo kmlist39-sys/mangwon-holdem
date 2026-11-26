@@ -64,7 +64,7 @@ final class OutcomeAnnouncement {
                 if(who!=null&&who.length()>0){
                     DealerLine line=new DealerLine(prefix+joined(who)+(who.length()==1?"이 팟을 가져갑니다.":"이 팟을 나눠 갖습니다."));
                     if(!potKey.isEmpty())line.clips.add(potKey);
-                    winnerKeys(line,who,"won");lines.add(line);
+                    winnerKeys(line,who,"won");lines.add(line.payout(index,0));
                 }
                 continue;
             }
@@ -74,8 +74,8 @@ final class OutcomeAnnouncement {
             boolean hasLower=lower.optLong("amount")>0&&b!=null&&b.length()>0;
             if(!hasUpper&&!hasLower)continue;
             if(index==0||!hasUpper||!hasLower){
-                if(hasUpper)lines.add(board(upper,true,prefix,potKey,index==0));
-                if(hasLower)lines.add(board(lower,false,hasUpper?"":prefix,hasUpper?"":potKey,index==0));
+                if(hasUpper)lines.add(board(upper,true,prefix,potKey,index==0).payout(index,0));
+                if(hasLower)lines.add(board(lower,false,hasUpper?"":prefix,hasUpper?"":potKey,index==0).payout(index,1));
                 if(!hasUpper||!hasLower)continue;
             }
             Set<Integer> aa=ids(a),bb=ids(b);
@@ -97,8 +97,8 @@ final class OutcomeAnnouncement {
                 summary.clips.add("result:bothTie");
             }
             else if(index>0){
-                lines.add(board(upper,true,prefix,potKey,false));
-                lines.add(board(lower,false,"","",false));
+                lines.add(board(upper,true,prefix,potKey,false).payout(index,0));
+                lines.add(board(lower,false,"","",false).payout(index,1));
                 summary=null;
             }
             else summary=new DealerLine("각 보드의 승자들이 팟을 나눠 갖습니다.","result:shared");
@@ -107,7 +107,7 @@ final class OutcomeAnnouncement {
                     DealerLine titled=new DealerLine(prefix+summary.text,potKey);
                     titled.clips.addAll(summary.clips);summary=titled;
                 }
-                lines.add(summary);
+                lines.add(index>0?summary.payout(index,0):summary);
             }
             anyOddChip|=upper.optLong("amount")!=lower.optLong("amount")||unequal(a)||unequal(b);
         }

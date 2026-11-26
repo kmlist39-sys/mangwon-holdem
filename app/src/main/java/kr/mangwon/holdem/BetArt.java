@@ -150,8 +150,10 @@ final class BetArt {
         a.text(value,x,y,font,color,a.bold,align);
     }
     void result(){
-        float left=18,right=a.cashDesk.visible()?474:647,cx=(left+right)/2;
+        boolean moving=a.payouts.presenting(a.now);
+        float left=18,right=moving?849:a.cashDesk.visible()?474:647,cx=(left+right)/2;
         part(plaque,.005f,.12f,.995f,.88f,left,447,right,518,255);
+        if(moving&&a.payouts.banner(cx,right-left-88,a.now))return;
         String summary=a.g.optString("summary");
         String[] winners=summary.split("  /  ");
         String first=summary,second="";

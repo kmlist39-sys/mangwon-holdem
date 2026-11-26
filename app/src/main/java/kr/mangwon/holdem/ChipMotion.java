@@ -105,7 +105,9 @@ final class ChipMotion {
         a.reset(-1);a.p.setAlpha(alpha);a.c.drawBitmap(atlas,slots[Math.floorMod(color,4)],dst,a.p);
     }
     void pot(){
-        float visible=layers(a.now);int count=(int)Math.ceil(visible);
+        int balance=a.payouts.balance(paidPot,a.now);
+        float visible=balance==paidPot?layers(a.now):potLayers(balance);
+        int count=(int)Math.ceil(visible);
         for(int pile=0;pile<PILE_X.length;pile++){
             for(int chip=pile;chip<count;chip+=8){
                 float f=Math.min(1,Math.max(0,visible-chip)),u=TitleSequence.smooth(f);
@@ -118,7 +120,7 @@ final class ChipMotion {
         }
         a.stage.plate(291,291,401,316,0);
         a.mid("POT",313,307,10,a.gold);
-        stage.bet.fitted(a.fmt(Math.max(0,paidPot)),361,308,66,15,a.paper,android.graphics.Paint.Align.CENTER);
+        stage.bet.fitted(a.fmt(Math.max(0,balance)),361,308,66,15,a.paper,android.graphics.Paint.Align.CENTER);
     }
 
     private static float ease(long age,int from,int duration){

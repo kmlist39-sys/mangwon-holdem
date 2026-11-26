@@ -75,7 +75,8 @@ final class HoleSqueeze {
         boolean checked=a.opt.optBoolean("squeeze");
         String phase=game.optString("phase");
         float left=657,width=165;
-        if(game.optBoolean("rebuy"))left=517;
+        if(a.payouts.presenting(a.now)){left=893;width=165;}
+        else if(game.optBoolean("rebuy"))left=517;
         else if("done".equals(phase)&&game.optJSONObject("cashFunding")!=null){left=482;width=153;}
         else if("showdown".equals(phase)&&game.optInt("show")>0&&!game.optBoolean("awaitingSqueeze")){left=925;width=143;}
         float y="tableSqueeze".equals(a.held)?484:483;

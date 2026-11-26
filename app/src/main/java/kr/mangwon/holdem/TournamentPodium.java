@@ -44,7 +44,7 @@ final class TournamentPodium {
         if(game!=null){
             result=null;
             if(trophies==null&&!game.optBoolean("cash")&&game.optInt("left",99)<=4)
-                trophies=a.image("podium-trophies.webp");
+                trophies=a.honors.trophySheet();
             return;
         }
         JSONObject outcome=snapshot.optJSONObject("tournamentResult");
@@ -62,7 +62,7 @@ final class TournamentPodium {
         pub=venue;
         moving=justFinished&&ValueAnimator.areAnimatorsEnabled();
         began=SystemClock.uptimeMillis();
-        if(trophies==null)trophies=a.image("podium-trophies.webp");
+        if(trophies==null)trophies=a.honors.trophySheet();
         room=a.stage.place.backdrop(VenueScene.roomFor(pub,outcome.optInt("initial",18)));
     }
 
@@ -114,11 +114,17 @@ final class TournamentPodium {
         String heading=result.optBoolean("tied")?"공동 "+rank+"위":rank==1?"1위 우승":rank==2?"2위 준우승":"3위 입상";
         a.text(heading,546,219,68,cream,a.title,Paint.Align.LEFT);
         a.line(550,245,943,245,alpha(tint,.56f*reveal),1);
-        a.txt("획득 상금",552,279,17,muted);
-        a.text(a.fmt(result.optLong("payout"))+" P",548,330,45,accent,a.nums,Paint.Align.LEFT);
-        a.txt("총상금  "+a.fmt(result.optLong("pool"))+" P   ·   참가 "+result.optInt("initial")+"명",552,366,16,muted);
+        JSONObject pass=result.optJSONObject("ticketAwarded");
+        a.txt("획득 상금",552,pass==null?279:267,17,muted);
+        a.text(a.fmt(result.optLong("payout"))+" P",548,pass==null?330:308,pass==null?45:40,accent,a.nums,Paint.Align.LEFT);
+        a.txt("총상금  "+a.fmt(result.optLong("pool"))+" P   ·   참가 "+result.optInt("initial")+"명",552,pass==null?366:334,16,muted);
+        if(pass!=null&&reveal>.8f){
+            a.honors.voucher(pass,547,342,296,94,a.en?"Bonus entry pass":"우승 보너스 · 바이인 1회권");
+        }
         c.restore();
-        a.key("로비로",547,405,208,53,"close",1);
+        float buttons=pass==null?405:446;
+        a.key("로비로",547,buttons,176,49,"close",1);
+        a.key(a.en?"My awards":"나의 수상 이력",735,buttons,212,49,"honorsOpen",0);
     }
 
     private static int alpha(int color,float opacity){

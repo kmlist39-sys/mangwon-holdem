@@ -8,5 +8,8 @@ import java.util.List;
 final class DealerLine {
     final String text;
     final List<String> clips=new ArrayList<>();
+    int payoutPot=-1,payoutBoard=-1;
+    String settlement="";
+    DealerLine payout(int pot,int board){payoutPot=pot;payoutBoard=board;return this;}
     DealerLine(String text,String... keys){this.text=text;clips.addAll(Arrays.asList(keys));}
 }

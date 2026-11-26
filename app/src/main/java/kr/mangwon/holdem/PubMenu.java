@@ -228,6 +228,7 @@ final class PubMenu {
         if ("entry".equals(a.panel)) return;
         drawTitle(255);
         controls();
+        a.honors.lobbyButton(left+21,top+66);
     }
 
     void drawTitle(int alpha) {

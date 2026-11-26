@@ -17,13 +17,20 @@ final class DealerVoice {
     private final GameActivity activity;
     private final GeminiBank bank;
     private final Handler ui=new Handler(Looper.getMainLooper());
-    private final ArrayDeque<DealerLine> pending=new ArrayDeque<>();
-    private final ArrayDeque<String> recorded=new ArrayDeque<>();
+    private final ArrayDeque<Clip> recorded=new ArrayDeque<>();
+    private static final class Clip {
+        final String key,settlement;
+        final int pot,board;
+        Clip(String key,String settlement,int pot,int board){this.key=key;this.settlement=settlement;this.pot=pot;this.board=board;}
+    }
     private final AudioAttributes audio=new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_GAME)
         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build();
     private MediaPlayer playing;
     private MediaPlayer prefetched;
-    private String prefetchedKey="";
+    private Clip prefetchedClip;
+    private String payoutId="";
+    private final java.util.BitSet payoutCues=new java.util.BitSet();
+    boolean expects(String id,int pot,int board){return id.equals(payoutId)&&payoutCues.get(pot*2+board);}
     private boolean playingStarted,prefetchedReady,prefetchedLinked;
     private int seenHand=-1,seenAction=-1,titleHand=-1,generation;
     private String settlementId="";
@@ -34,7 +41,7 @@ final class DealerVoice {
 
     DealerVoice(GameActivity activity){this.activity=activity;bank=new GeminiBank(activity);}
     boolean ready(){return bank.ready();}
-    boolean busy(){return playing!=null||prefetched!=null||!pending.isEmpty()||!recorded.isEmpty();}
+    boolean busy(){return playing!=null||prefetched!=null||!recorded.isEmpty();}
     String status(){return bank.status();}
     void lastRebuyLevel(){
         if(activity.active&&ready()&&add(new DealerLine("이번 블라인드가 마지막 리바인 기회입니다.","rebuy-level")))playNext();
@@ -47,8 +54,8 @@ final class DealerVoice {
         else{
             // A proof pack may currently provide only one genuine recording.
             String[] options={"check","showdown","call","raise","allin","fold","result:main"};
-            for(String key:options)if(bank.has(key)){recorded.add(key);break;}
-            if(recorded.isEmpty()){String first=bank.sampleKey();if(first!=null)recorded.add(first);}
+            for(String key:options)if(bank.has(key)){recorded.add(new Clip(key,"",-1,-1));break;}
+            if(recorded.isEmpty()){String first=bank.sampleKey();if(first!=null)recorded.add(new Clip(first,"",-1,-1));}
         }
         playNext();
     }
@@ -86,7 +93,8 @@ final class DealerVoice {
             if(title&&titleHand!=hand&&add(new DealerLine("쇼다운!","showdown")))hold();
             if(result!=null&&!resultId.equals(settlementId)){
                 List<DealerLine> lines=OutcomeAnnouncement.phrases(result,dual);
-                boolean any=false;for(DealerLine line:lines)if(add(line))any=true;if(any)hold();
+                payoutId=resultId;payoutCues.clear();
+                boolean any=false;for(DealerLine line:lines){line.settlement=resultId;if(add(line))any=true;}if(any)hold();
             }
             addTournamentEvents(events);
         }
@@ -161,31 +169,39 @@ final class DealerVoice {
         if(add(line)){hold();playNext();}
     }
     private boolean available(DealerLine line){return line!=null&&!line.text.isEmpty()&&!bank.resolve(line).isEmpty();}
-    private boolean add(DealerLine line){if(!available(line))return false;pending.add(line);return true;}
-    private void hold(){held=true;activity.talkingUntil=Long.MAX_VALUE;}
-    private String nextKey(){
-        while(recorded.isEmpty()&&!pending.isEmpty())recorded.addAll(bank.resolve(pending.removeFirst()));
-        return recorded.pollFirst();
+    private boolean add(DealerLine line){
+        if(line==null||line.text.isEmpty())return false;
+        List<String> keys=bank.resolve(line);
+        for(int i=0;i<keys.size();i++){
+            String key=keys.get(i);
+            int board=i==0?line.payoutBoard:-1;
+            if(line.payoutBoard==0&&key.equals("board:lowerWin"))board=1;
+            int pot=board>=0?line.payoutPot:-1;
+            if(pot>=0)payoutCues.set(pot*2+board);
+            recorded.add(new Clip(key,line.settlement,pot,board));
+        }
+        return !keys.isEmpty();
     }
+    private void hold(){held=true;activity.talkingUntil=Long.MAX_VALUE;}
     private void playNext(){
         if(playing!=null){prefetch();return;}
-        if(!activity.active||!ready()){pending.clear();recorded.clear();finishQueue();return;}
-        String key=nextKey();
+        if(!activity.active||!ready()){recorded.clear();finishQueue();return;}
+        Clip key=recorded.pollFirst();
         if(key==null){finishQueue();return;}
         prepare(key,false);
     }
     private void prefetch(){
         if(prefetched!=null||playing==null||!activity.active)return;
-        String key=nextKey();if(key!=null)prepare(key,true);
+        Clip key=recorded.pollFirst();if(key!=null)prepare(key,true);
     }
-    private void prepare(String key,boolean ahead){
+    private void prepare(Clip clip,boolean ahead){
         int token=generation;
         MediaPlayer player=new MediaPlayer();
-        if(ahead){prefetched=player;prefetchedKey=key;prefetchedReady=false;prefetchedLinked=false;}else playing=player;
+        if(ahead){prefetched=player;prefetchedClip=clip;prefetchedReady=false;prefetchedLinked=false;}else playing=player;
         try{
             if(ahead)player.setAudioSessionId(playing.getAudioSessionId());
             player.setAudioAttributes(audio);
-            try(AssetFileDescriptor fd=bank.open(key)){
+            try(AssetFileDescriptor fd=bank.open(clip.key)){
                 player.setDataSource(fd.getFileDescriptor(),fd.getStartOffset(),fd.getLength());
             }
             player.setVolume(.96f,.96f);
@@ -195,7 +211,7 @@ final class DealerVoice {
                 if(token!=generation||!activity.active)return;
                 ui.removeCallbacksAndMessages(p);
                 if(prefetched==p){prefetchedReady=true;linkNext();}
-                else if(playing==p)start(p,key,false);
+                else if(playing==p)start(p,clip,false);
             });
             watch(player,16000);
             player.prepareAsync();
@@ -216,15 +232,16 @@ final class DealerVoice {
             prefetchedLinked=true;
         }catch(IllegalStateException|IllegalArgumentException ignored){/* Fall back to the completion callback. */}
     }
-    private void start(MediaPlayer player,String key,boolean alreadyStarted){
+    private void start(MediaPlayer player,Clip clip,boolean alreadyStarted){
         if(activity.music!=null)activity.music.setDucked(true);
         try{
             if(!alreadyStarted)player.start();
             watch(player,Math.max(0,player.getDuration())+8000L);
         }catch(IllegalStateException error){finished(player,false);return;}
         playingStarted=true;
+        if(clip.pot>=0)activity.arena.payouts.heard(clip.settlement,clip.pot,clip.board,SystemClock.uptimeMillis());
         if((activity.getApplicationInfo().flags&android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE)!=0)
-            Log.d("MangwonVoice",SystemClock.uptimeMillis()+" "+key);
+            Log.d("MangwonVoice",SystemClock.uptimeMillis()+" "+clip.key);
         prefetch();linkNext();
     }
     private void finished(MediaPlayer player,boolean reachedEnd){
@@ -236,18 +253,19 @@ final class DealerVoice {
         if(playing!=player)return;
         playing=null;playingStarted=false;player.release();
         if(prefetched!=null){
-            playing=prefetched;String key=prefetchedKey;boolean ready=prefetchedReady;
+            playing=prefetched;Clip key=prefetchedClip;boolean ready=prefetchedReady;
             boolean linked=prefetchedLinked;
             prefetched=null;prefetchedReady=false;prefetchedLinked=false;
             if(ready)start(playing,key,linked&&reachedEnd);
         }else playNext();
     }
     private void finishQueue(){
+        payoutCues.clear();payoutId="";
         if(activity.music!=null)activity.music.setDucked(false);
         held=false;previewing=false;tournamentQueue=false;cashEntryQueue=false;activity.talkingUntil=0;
     }
     void stop(){
-        generation++;pending.clear();recorded.clear();ui.removeCallbacksAndMessages(null);
+        generation++;recorded.clear();ui.removeCallbacksAndMessages(null);
         if(playing!=null){MediaPlayer p=playing;playing=null;p.release();}
         if(prefetched!=null){MediaPlayer p=prefetched;prefetched=null;p.release();}
         playingStarted=false;prefetchedReady=false;prefetchedLinked=false;
